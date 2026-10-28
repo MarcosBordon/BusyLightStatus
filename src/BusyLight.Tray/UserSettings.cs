@@ -8,6 +8,9 @@ public sealed class UserSettings
     public AppMode Mode { get; set; } = AppMode.Auto;
     public ManualState ManualState { get; set; } = ManualState.Available;
 
+    public string CustomColor { get; set; } = "#00A0FF";
+    public int CustomBrightness { get; set; } = 80;
+
     private static readonly string Folder = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BusyLightStatus");
 

@@ -36,4 +36,7 @@ public static class PresenceMapper
 
         return new PatternStatusCommand("setStatus", "rounded", color, effect, (byte)brightness);
     }
+        // Color personalizado: esquinas apagadas, efecto fijo
+    public static PatternStatusCommand MapCustom(string color, int brightness) =>
+        new("setStatus", "rounded", color, "solid", (byte)Math.Clamp(brightness, 10, 100));
 }

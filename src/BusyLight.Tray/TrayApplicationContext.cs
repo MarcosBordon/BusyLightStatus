@@ -18,6 +18,9 @@ public sealed class TrayApplicationContext : ApplicationContext
 
     private readonly ToolStripMenuItem _autoItem;
     private readonly ToolStripMenuItem _manualItem;
+    private readonly ToolStripMenuItem _customItem;
+    private bool _customOpen;
+
     private readonly Dictionary<ManualState, ToolStripMenuItem> _stateItems = new();
 
     private static readonly (ManualState State, string Text)[] ManualOptions =
@@ -51,11 +54,13 @@ public sealed class TrayApplicationContext : ApplicationContext
             _stateItems[state] = item;
             stateMenu.DropDownItems.Add(item);
         }
+         _customItem = new ToolStripMenuItem("Color personalizado…", null,
+            async (_, _) => await OpenCustomColorAsync());
 
         var menu = new ContextMenuStrip();
         menu.Items.Add(modeMenu);
         menu.Items.Add(stateMenu);
-        menu.Items.Add(new ToolStripMenuItem("Color personalizado… (etapa 4)") { Enabled = false });
+        menu.Items.Add(_customItem);
         menu.Items.Add(new ToolStripMenuItem("Mensaje de texto… (etapa 5)") { Enabled = false });
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Actualizar ahora", null, async (_, _) => await SafeAsync(RefreshAsync));
@@ -98,9 +103,9 @@ public sealed class TrayApplicationContext : ApplicationContext
             {
                 await Task.Delay(interval, ct);
 
-                if (_mode == AppMode.Auto) await UpdatePresenceAsync(ct);
-                else await KeepAliveAsync(ct);
-            }
+                if (_customOpen) await KeepAliveAsync(ct);             // no pisar la vista previa
+                else if (_mode == AppMode.Auto) await UpdatePresenceAsync(ct);
+                else await KeepAliveAsync(ct);            }
         }
         catch (OperationCanceledException) { }
         catch (Exception ex) { SetStatus("Error: " + ex.Message); }
@@ -190,13 +195,16 @@ public sealed class TrayApplicationContext : ApplicationContext
     {
         try
         {
-            await _serial.SendAsync(PresenceMapper.MapManual(_settings.ManualState), ct);
+            var command = _settings.ManualState == ManualState.Custom
+                ? PresenceMapper.MapCustom(_settings.CustomColor, _settings.CustomBrightness)
+                : PresenceMapper.MapManual(_settings.ManualState);
+
+            await _serial.SendAsync(command, ct);
             SetStatus($"Manual: {LabelOf(_settings.ManualState)} | {_serial.PortName}");
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception ex) { SetStatus("Error: " + ex.Message); }
     }
-
     private async Task KeepAliveAsync(CancellationToken ct)
     {
         try
@@ -237,6 +245,32 @@ public sealed class TrayApplicationContext : ApplicationContext
         await SafeAsync(ApplyManualStateAsync);
     }
 
+    private async Task OpenCustomColorAsync()
+    {
+        if (_customOpen) return;
+        _customOpen = true;
+
+        try
+        {
+            using var form = new CustomColorForm(_settings.CustomColor, _settings.CustomBrightness,
+                (color, brightness) => _serial.SendAsync(PresenceMapper.MapCustom(color, brightness), _cts.Token));
+
+            if (form.ShowDialog() == DialogResult.OK)
+            {
+                _settings.CustomColor = form.SelectedColor;
+                _settings.CustomBrightness = form.SelectedBrightness;
+                await SelectManualStateAsync(ManualState.Custom);
+            }
+            else
+            {
+                await SafeAsync(RefreshAsync);   // Cancelar: vuelve al estado anterior
+            }
+        }
+        finally
+        {
+            _customOpen = false;
+        }
+    }
     private async Task ReconnectAsync(CancellationToken ct)
     {
         var ok = await _serial.ConnectAsync(ct);
@@ -266,11 +300,13 @@ public sealed class TrayApplicationContext : ApplicationContext
 
         foreach (var (state, item) in _stateItems)
             item.Checked = _mode == AppMode.Manual && state == _settings.ManualState;
+
+        _customItem.Checked = _mode == AppMode.Manual && _settings.ManualState == ManualState.Custom;
     }
-
     private static string LabelOf(ManualState state) =>
-        ManualOptions.First(o => o.State == state).Text;
-
+        state == ManualState.Custom
+            ? "Color personalizado"
+            : ManualOptions.First(o => o.State == state).Text;
     private void Notify(string text) =>
         _icon.ShowBalloonTip(5000, "BusyLightStatus", text, ToolTipIcon.Info);
 

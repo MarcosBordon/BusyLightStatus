@@ -19,4 +19,4 @@ public sealed record PingCommand(string Cmd);
 
 public enum AppMode { Auto, Manual }
 
-public enum ManualState { Available, Busy, InAMeeting, DoNotDisturb, Presenting, Away }
+public enum ManualState { Available, Busy, InAMeeting, DoNotDisturb, Presenting, Away, Custom }
