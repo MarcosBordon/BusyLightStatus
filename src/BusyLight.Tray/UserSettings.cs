@@ -10,7 +10,10 @@ public sealed class UserSettings
 
     public string CustomColor { get; set; } = "#00A0FF";
     public int CustomBrightness { get; set; } = 80;
-
+    public string TextMessage { get; set; } = "EN REUNION";
+    public string TextColor { get; set; } = "#00A0FF";
+    public bool TextRandom { get; set; } = false;
+    public int TextBrightness { get; set; } = 80;
     private static readonly string Folder = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BusyLightStatus");
 

@@ -14,9 +14,12 @@ public sealed record LightsCommand(string Cmd, string Pattern, string Top, strin
 public sealed record PatternStatusCommand(string Cmd, string Pattern, string Color,
     string Effect, byte Brightness);
 
+// Texto letra por letra (FW 1.3.0+)
+public sealed record TextCommand(string Cmd, string Text, string Color, bool Random, byte Brightness);
+
 // Comando nuevo: renueva el watchdog sin cambiar los LED (FW 1.2.0+)
 public sealed record PingCommand(string Cmd);
 
 public enum AppMode { Auto, Manual }
 
-public enum ManualState { Available, Busy, InAMeeting, DoNotDisturb, Presenting, Away, Custom }
+public enum ManualState { Available, Busy, InAMeeting, DoNotDisturb, Presenting, Away, Custom, Text }

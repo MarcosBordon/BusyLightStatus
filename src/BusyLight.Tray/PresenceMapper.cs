@@ -39,4 +39,9 @@ public static class PresenceMapper
         // Color personalizado: esquinas apagadas, efecto fijo
     public static PatternStatusCommand MapCustom(string color, int brightness) =>
         new("setStatus", "rounded", color, "solid", (byte)Math.Clamp(brightness, 10, 100));
+
+    // Mensaje de texto: el firmware lo muestra letra por letra y lo repite
+    public static TextCommand MapText(string text, string color, bool random, int brightness) =>
+        new("setText", text, color, random, (byte)Math.Clamp(brightness, 10, 100));
+
 }
