@@ -9,6 +9,7 @@ public sealed class SerialDeviceService : IDisposable
     private const string DeviceSignature = "BUSYLIGHT-ATOM";
 
     private readonly int _baudRate;
+    private readonly SemaphoreSlim _lock = new(1, 1);
     private SerialPort? _port;
 
     public string? PortName => _port?.PortName;
@@ -16,6 +17,47 @@ public sealed class SerialDeviceService : IDisposable
     public SerialDeviceService(int baudRate) => _baudRate = baudRate;
 
     public async Task<bool> ConnectAsync(CancellationToken ct = default)
+    {
+        await _lock.WaitAsync(ct);
+        try { return await ConnectCoreAsync(ct); }
+        finally { _lock.Release(); }
+    }
+
+    // Envía un comando. Devuelve true si tuvo que abrir una conexión nueva.
+    public async Task<bool> SendAsync(object command, CancellationToken ct = default)
+    {
+        await _lock.WaitAsync(ct);
+        try
+        {
+            var reconnected = false;
+
+            if (_port is not { IsOpen: true })
+            {
+                if (!await ConnectCoreAsync(ct))
+                    throw new IOException("No se encontró el Busy Light por USB.");
+                reconnected = true;
+            }
+
+            try
+            {
+                _port!.DiscardInBuffer();
+                _port.WriteLine(JsonSerializer.Serialize(command, command.GetType()));
+            }
+            catch
+            {
+                DisposePort();
+                throw;
+            }
+
+            return reconnected;
+        }
+        finally
+        {
+            _lock.Release();
+        }
+    }
+
+    private async Task<bool> ConnectCoreAsync(CancellationToken ct)
     {
         DisposePort();
 
@@ -62,22 +104,6 @@ public sealed class SerialDeviceService : IDisposable
         }
 
         return false;
-    }
-
-    public async Task SendAsync(DeviceCommand command, CancellationToken ct = default)
-    {
-        if (_port is not { IsOpen: true } && !await ConnectAsync(ct))
-            throw new IOException("No se encontró el Busy Light por USB.");
-
-        try
-        {
-            _port!.WriteLine(JsonSerializer.Serialize(command));
-        }
-        catch
-        {
-            DisposePort();
-            throw;
-        }
     }
 
     private void DisposePort()
