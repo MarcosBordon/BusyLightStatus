@@ -1,61 +1,278 @@
+using System.Net;
+using Microsoft.Identity.Client;
+
 namespace BusyLight.Tray;
 
 public sealed class TrayApplicationContext : ApplicationContext
 {
     private readonly AppConfig _config = AppConfig.Load();
+    private readonly UserSettings _settings = UserSettings.Load();
     private readonly NotifyIcon _icon;
     private readonly CancellationTokenSource _cts = new();
-    private readonly GraphPresenceService _graph;
     private readonly SerialDeviceService _serial;
+    private readonly GraphPresenceService? _graph;
+
+    private bool _graphAvailable;
+    private AppMode _mode;
     private string _last = "Iniciando";
+
+    private readonly ToolStripMenuItem _autoItem;
+    private readonly ToolStripMenuItem _manualItem;
+    private readonly Dictionary<ManualState, ToolStripMenuItem> _stateItems = new();
+
+    private static readonly (ManualState State, string Text)[] ManualOptions =
+    {
+        (ManualState.Available,    "Disponible"),
+        (ManualState.Busy,         "Ocupado"),
+        (ManualState.InAMeeting,   "En reunión"),
+        (ManualState.DoNotDisturb, "No molestar"),
+        (ManualState.Presenting,   "Presentando"),
+        (ManualState.Away,         "Ausente"),
+    };
 
     public TrayApplicationContext()
     {
-        _graph = new GraphPresenceService(_config);
         _serial = new SerialDeviceService(_config.SerialBaudRate);
+        _graphAvailable = _config.IsGraphConfigured;
+        if (_graphAvailable) _graph = new GraphPresenceService(_config);
+        _mode = _graphAvailable ? _settings.Mode : AppMode.Manual;
+
+        // Menú: Modo
+        _autoItem   = new ToolStripMenuItem("Automático (Teams)", null, async (_, _) => await SetModeAsync(AppMode.Auto));
+        _manualItem = new ToolStripMenuItem("Manual Use", null, async (_, _) => await SetModeAsync(AppMode.Manual));
+        var modeMenu = new ToolStripMenuItem("Modo");
+        modeMenu.DropDownItems.AddRange(new ToolStripItem[] { _autoItem, _manualItem });
+
+        // Menú: Estado manual
+        var stateMenu = new ToolStripMenuItem("Estado manual");
+        foreach (var (state, text) in ManualOptions)
+        {
+            var item = new ToolStripMenuItem(text, null, async (_, _) => await SelectManualStateAsync(state));
+            _stateItems[state] = item;
+            stateMenu.DropDownItems.Add(item);
+        }
+
         var menu = new ContextMenuStrip();
-        menu.Items.Add("Actualizar ahora", null, async (_, _) => await UpdateOnceAsync());
-        menu.Items.Add("Reconectar dispositivo", null, async (_, _) => await ReconnectAsync());
-        menu.Items.Add("Estado", null, (_, _) => MessageBox.Show(_last, "Busy Light Status"));
+        menu.Items.Add(modeMenu);
+        menu.Items.Add(stateMenu);
+        menu.Items.Add(new ToolStripMenuItem("Color personalizado… (etapa 4)") { Enabled = false });
+        menu.Items.Add(new ToolStripMenuItem("Mensaje de texto… (etapa 5)") { Enabled = false });
+        menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add("Actualizar ahora", null, async (_, _) => await SafeAsync(RefreshAsync));
+        menu.Items.Add("Reconectar dispositivo", null, async (_, _) => await SafeAsync(ReconnectAsync));
+        menu.Items.Add("Estado", null, (_, _) => MessageBox.Show(_last, "BusyLightStatus"));
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Salir", null, (_, _) => Exit());
-        _icon = new NotifyIcon { Icon = LoadTrayIcon(), Text = "Busy Light Status", Visible = true, ContextMenuStrip = menu };
+
+        _icon = new NotifyIcon
+        {
+            Icon = LoadTrayIcon(),
+            Text = "BusyLightStatus",
+            Visible = true,
+            ContextMenuStrip = menu
+        };
+
+        UpdateMenu();
         _ = RunAsync(_cts.Token);
     }
+
+    // ---------- Ciclo principal ----------
 
     private async Task RunAsync(CancellationToken ct)
     {
         try
         {
-            await _graph.SignInAsync(ct);
+            if (!_config.IsGraphConfigured)
+                Notify("Sin configuración de Entra ID. Se activó el modo Manual Use.");
+
+            if (_mode == AppMode.Auto)
+                await TrySignInAsync(ct);
+
             await _serial.ConnectAsync(ct);
+            await RefreshAsync(ct);
+
+            // Entre 10 y 30 s: en manual, el ping siempre llega antes del watchdog de 60 s
+            var interval = TimeSpan.FromSeconds(Math.Clamp(_config.PollSeconds, 10, 30));
+
             while (!ct.IsCancellationRequested)
             {
-                await UpdateOnceAsync(ct);
-                await Task.Delay(TimeSpan.FromSeconds(Math.Max(10, _config.PollSeconds)), ct);
+                await Task.Delay(interval, ct);
+
+                if (_mode == AppMode.Auto) await UpdatePresenceAsync(ct);
+                else await KeepAliveAsync(ct);
             }
         }
         catch (OperationCanceledException) { }
         catch (Exception ex) { SetStatus("Error: " + ex.Message); }
     }
 
-    private async Task UpdateOnceAsync(CancellationToken ct = default)
+    private Task RefreshAsync(CancellationToken ct) =>
+        _mode == AppMode.Auto ? UpdatePresenceAsync(ct) : ApplyManualStateAsync(ct);
+
+    // ---------- Modo automático ----------
+
+    private async Task<bool> TrySignInAsync(CancellationToken ct)
     {
+        if (_graph is null)
+        {
+            DisableAuto("Sin configuración de Entra ID");
+            return false;
+        }
+
+        try
+        {
+            await _graph.SignInAsync(ct);
+            return true;
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex) when (IsAuthorizationProblem(ex))
+        {
+            DisableAuto("Sin autorización para leer la presencia de Teams");
+            return false;
+        }
+        catch (Exception ex)
+        {
+            SetStatus("Error de inicio de sesión: " + ex.Message);   // temporal: sigue en automático
+            return false;
+        }
+    }
+
+    private async Task UpdatePresenceAsync(CancellationToken ct)
+    {
+        if (_graph is null) return;
+
         try
         {
             var p = await _graph.GetMyPresenceAsync(ct);
-            var command = PresenceMapper.Map(p, _config.Brightness);
-            await _serial.SendAsync(command, ct);
-            SetStatus($"{p.Availability} / {p.Activity} | {_serial.PortName}");
+            if (_mode != AppMode.Auto) return;   // el usuario cambió de modo mientras tanto
+
+            await _serial.SendAsync(PresenceMapper.Map(p, _config.Brightness), ct);
+            SetStatus($"Automático: {p.Availability} / {p.Activity} | {_serial.PortName}");
         }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex) when (IsAuthorizationProblem(ex))
+        {
+            DisableAuto("Sin autorización para leer la presencia de Teams");
+            await ApplyManualStateAsync(ct);
+        }
+        catch (Exception ex)
+        {
+            SetStatus("Error: " + ex.Message);   // red o Graph: reintenta en el próximo ciclo
+        }
+    }
+
+    private static bool IsAuthorizationProblem(Exception ex) => ex switch
+    {
+        MsalUiRequiredException => true,
+        MsalClientException c when c.ErrorCode == MsalError.AuthenticationCanceledError => true,
+        MsalServiceException s when s.Message.Contains("AADSTS65001")    // sin consentimiento
+                                 || s.Message.Contains("AADSTS90094")    // requiere aprobación de admin
+                                 || s.Message.Contains("AADSTS50105")    // usuario no asignado
+                                 || s.Message.Contains("AADSTS700016")   // aplicación no encontrada
+                                 => true,
+        HttpRequestException h when h.StatusCode is HttpStatusCode.Forbidden
+                                                 or HttpStatusCode.Unauthorized => true,
+        _ => false
+    };
+
+    private void DisableAuto(string reason)
+    {
+        _graphAvailable = false;
+        _mode = AppMode.Manual;   // no se guarda: al reiniciar se vuelve a intentar Teams
+        SetStatus(reason + ". Modo Manual Use activo.");
+        Notify(reason + ". Se activó el modo Manual Use.");
+        UpdateMenu();
+    }
+
+    // ---------- Modo manual ----------
+
+    private async Task ApplyManualStateAsync(CancellationToken ct)
+    {
+        try
+        {
+            await _serial.SendAsync(PresenceMapper.MapManual(_settings.ManualState), ct);
+            SetStatus($"Manual: {LabelOf(_settings.ManualState)} | {_serial.PortName}");
+        }
+        catch (OperationCanceledException) { throw; }
         catch (Exception ex) { SetStatus("Error: " + ex.Message); }
     }
 
-    private async Task ReconnectAsync()
+    private async Task KeepAliveAsync(CancellationToken ct)
     {
-        var ok = await _serial.ConnectAsync(_cts.Token);
-        SetStatus(ok ? $"Dispositivo conectado en {_serial.PortName}" : "Dispositivo no encontrado");
+        try
+        {
+            var reconnected = await _serial.SendAsync(new PingCommand("ping"), ct);
+            if (reconnected) await ApplyManualStateAsync(ct);   // ATOM reconectado: reenviar estado
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex) { SetStatus("Error: " + ex.Message); }
     }
+
+    // ---------- Acciones del menú ----------
+
+    private async Task SetModeAsync(AppMode mode)
+    {
+        if (mode == AppMode.Auto && !_graphAvailable) return;
+
+        _mode = mode;
+        _settings.Mode = mode;
+        _settings.Save();
+        UpdateMenu();
+
+        await SafeAsync(async ct =>
+        {
+            if (mode == AppMode.Auto) await TrySignInAsync(ct);
+            await RefreshAsync(ct);   // si el inicio de sesión falló, ya está en manual
+        });
+    }
+
+    private async Task SelectManualStateAsync(ManualState state)
+    {
+        _settings.ManualState = state;
+        _settings.Mode = AppMode.Manual;
+        _settings.Save();
+        _mode = AppMode.Manual;
+        UpdateMenu();
+
+        await SafeAsync(ApplyManualStateAsync);
+    }
+
+    private async Task ReconnectAsync(CancellationToken ct)
+    {
+        var ok = await _serial.ConnectAsync(ct);
+        if (!ok)
+        {
+            SetStatus("Dispositivo no encontrado");
+            return;
+        }
+        await RefreshAsync(ct);
+    }
+
+    private async Task SafeAsync(Func<CancellationToken, Task> action)
+    {
+        try { await action(_cts.Token); }
+        catch (OperationCanceledException) { }
+        catch (Exception ex) { SetStatus("Error: " + ex.Message); }
+    }
+
+    // ---------- Interfaz ----------
+
+    private void UpdateMenu()
+    {
+        _autoItem.Enabled = _graphAvailable;
+        _autoItem.Text = _graphAvailable ? "Automático (Teams)" : "Automático (Teams) - no disponible";
+        _autoItem.Checked = _mode == AppMode.Auto;
+        _manualItem.Checked = _mode == AppMode.Manual;
+
+        foreach (var (state, item) in _stateItems)
+            item.Checked = _mode == AppMode.Manual && state == _settings.ManualState;
+    }
+
+    private static string LabelOf(ManualState state) =>
+        ManualOptions.First(o => o.State == state).Text;
+
+    private void Notify(string text) =>
+        _icon.ShowBalloonTip(5000, "BusyLightStatus", text, ToolTipIcon.Info);
 
     private static Icon LoadTrayIcon()
     {
@@ -78,6 +295,10 @@ public sealed class TrayApplicationContext : ApplicationContext
 
     private void Exit()
     {
-        _cts.Cancel(); _serial.Dispose(); _icon.Visible = false; _icon.Dispose(); ExitThread();
+        _cts.Cancel();
+        _serial.Dispose();
+        _icon.Visible = false;
+        _icon.Dispose();
+        ExitThread();
     }
 }

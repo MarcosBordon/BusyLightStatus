@@ -1,0 +1,44 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
+
+namespace BusyLight.Tray;
+
+public sealed class UserSettings
+{
+    public AppMode Mode { get; set; } = AppMode.Auto;
+    public ManualState ManualState { get; set; } = ManualState.Available;
+
+    private static readonly string Folder = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BusyLightStatus");
+
+    private static readonly string FilePath = Path.Combine(Folder, "usersettings.json");
+
+    private static readonly JsonSerializerOptions Options = new()
+    {
+        WriteIndented = true,
+        Converters = { new JsonStringEnumConverter() }
+    };
+
+    public static UserSettings Load()
+    {
+        try
+        {
+            if (File.Exists(FilePath))
+                return JsonSerializer.Deserialize<UserSettings>(File.ReadAllText(FilePath), Options)
+                       ?? new UserSettings();
+        }
+        catch { /* archivo dañado: se usan valores por defecto */ }
+
+        return new UserSettings();
+    }
+
+    public void Save()
+    {
+        try
+        {
+            Directory.CreateDirectory(Folder);
+            File.WriteAllText(FilePath, JsonSerializer.Serialize(this, Options));
+        }
+        catch { /* no bloquear la app si no se puede guardar */ }
+    }
+}

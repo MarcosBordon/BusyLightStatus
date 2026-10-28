@@ -2,7 +2,7 @@
 #include <ArduinoJson.h>
 
 static const char* DEVICE_ID  = "BUSYLIGHT-ATOM";
-static const char* FW_VERSION = "1.3.0";
+static const char* FW_VERSION = "1.3.1";
 static const unsigned long WATCHDOG_MS = 60000UL;
 static const int MATRIX_LEDS = 25;
 
@@ -13,7 +13,7 @@ static const unsigned long TEXT_ON_MS    = 400;   // letra encendida (luego 100 
 static const unsigned long TEXT_PAUSE_MS = 1000;  // pausa entre repeticiones
 static const uint8_t CHAR_ENYE = 0x01;            // código interno para la Ñ
 
-enum Pattern { PATTERN_FULL, PATTERN_LIGHTS };
+enum Pattern { PATTERN_FULL, PATTERN_LIGHTS, PATTERN_ROUNDED };
 enum DisplayMode { BL_MODE_STATUS, BL_MODE_TEXT };
 
 // ---------- Fuente 5x5 (bit 4 = columna izquierda) ----------
@@ -215,25 +215,33 @@ void renderText(unsigned long now, uint32_t frame[MATRIX_LEDS])
 
 void buildFrame(uint32_t frame[MATRIX_LEDS], uint8_t pct)
 {
-    for (int row = 0; row < 5; row++)
+    for (int i = 0; i < MATRIX_LEDS; i++)
     {
+        int row = i / 5;
+        int col = i % 5;
         uint32_t c;
-        if (pattern == PATTERN_FULL)
+
+        if (pattern == PATTERN_LIGHTS)
         {
-            c = targetColor;
+            // Semáforo: filas 0, 2 y 4 encendidas
+            c = (row == 0) ? topColor
+              : (row == 2) ? middleColor
+              : (row == 4) ? bottomColor
+              : 0;
         }
         else
         {
-            switch (row)
+            c = targetColor;
+
+            // Rounded: esquinas apagadas
+            if (pattern == PATTERN_ROUNDED &&
+                (row == 0 || row == 4) && (col == 0 || col == 4))
             {
-                case 0:  c = topColor;    break;
-                case 2:  c = middleColor; break;
-                case 4:  c = bottomColor; break;
-                default: c = 0;           break;
+                c = 0;
             }
         }
-        uint32_t scaled = scaleColor(c, pct);
-        for (int col = 0; col < 5; col++) frame[row * 5 + col] = scaled;
+
+        frame[i] = scaleColor(c, pct);
     }
 }
 
@@ -283,7 +291,7 @@ void processLine(const String& line)
         }
         else
         {
-            pattern     = PATTERN_FULL;
+            pattern     = !strcmp(pat, "rounded") ? PATTERN_ROUNDED : PATTERN_FULL;
             targetColor = parseHex(doc["Color"] | "#0000FF", 0x0000FF);
         }
 
