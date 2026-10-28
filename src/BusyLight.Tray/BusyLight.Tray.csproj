@@ -2,6 +2,7 @@
   <PropertyGroup>
     <AssemblyName>BusyLightStatus</AssemblyName>
     <Product>BusyLightStatus</Product>
+    <ApplicationIcon>BusyLightStatus.ico</ApplicationIcon>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
     <UseWindowsForms>true</UseWindowsForms>
@@ -15,5 +16,6 @@
   </ItemGroup>
   <ItemGroup>
     <None Update="appsettings.json"><CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory></None>
+    <None Update="BusyLightStatus.ico"><CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory></None>
   </ItemGroup>
 </Project>

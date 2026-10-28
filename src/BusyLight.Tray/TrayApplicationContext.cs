@@ -19,7 +19,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         menu.Items.Add("Estado", null, (_, _) => MessageBox.Show(_last, "Busy Light Status"));
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Salir", null, (_, _) => Exit());
-        _icon = new NotifyIcon { Icon = SystemIcons.Information, Text = "Busy Light Status", Visible = true, ContextMenuStrip = menu };
+        _icon = new NotifyIcon { Icon = LoadTrayIcon(), Text = "Busy Light Status", Visible = true, ContextMenuStrip = menu };
         _ = RunAsync(_cts.Token);
     }
 
@@ -55,6 +55,19 @@ public sealed class TrayApplicationContext : ApplicationContext
     {
         var ok = await _serial.ConnectAsync(_cts.Token);
         SetStatus(ok ? $"Dispositivo conectado en {_serial.PortName}" : "Dispositivo no encontrado");
+    }
+
+    private static Icon LoadTrayIcon()
+    {
+        try
+        {
+            var path = Path.Combine(AppContext.BaseDirectory, "BusyLightStatus.ico");
+            return new Icon(path, SystemInformation.SmallIconSize);
+        }
+        catch
+        {
+            return SystemIcons.Information;
+        }
     }
 
     private void SetStatus(string value)
