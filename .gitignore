@@ -1,0 +1,15 @@
+# .NET
+bin/
+obj/
+.vs/
+*.user
+
+# PlatformIO
+.pio/
+.vscode/
+
+# Python
+.venv/
+
+# Configuracion local con IDs del tenant
+src/BusyLight.Tray/appsettings.json
