@@ -54,6 +54,6 @@ public sealed class GraphPresenceService
         var json = await response.Content.ReadAsStringAsync(ct);
         return JsonSerializer.Deserialize<GraphPresence>(json,
             new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
-            ?? throw new InvalidOperationException("Microsoft Graph devolvió una presencia vacía.");
+            ?? throw new InvalidOperationException(Strings.EmptyPresence);
     }
 }

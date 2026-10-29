@@ -9,7 +9,7 @@ public sealed class SerialDeviceService : IDisposable
     private const string DeviceSignature = "BUSYLIGHT-ATOM";
 
     private readonly int _baudRate;
-    private readonly SemaphoreSlim _lock = new(1, 1);
+    private readonly SemaphoreSlim _lock = new(1, 1);   // one write at a time
     private SerialPort? _port;
 
     public string? PortName => _port?.PortName;
@@ -23,7 +23,7 @@ public sealed class SerialDeviceService : IDisposable
         finally { _lock.Release(); }
     }
 
-    // Envía un comando. Devuelve true si tuvo que abrir una conexión nueva.
+    // Sends a command. Returns true if a new connection had to be opened.
     public async Task<bool> SendAsync(object command, CancellationToken ct = default)
     {
         await _lock.WaitAsync(ct);
@@ -34,7 +34,7 @@ public sealed class SerialDeviceService : IDisposable
             if (_port is not { IsOpen: true })
             {
                 if (!await ConnectCoreAsync(ct))
-                    throw new IOException("No se encontró el Busy Light por USB.");
+                    throw new IOException(Strings.DeviceNotFoundUsb);
                 reconnected = true;
             }
 
@@ -57,6 +57,7 @@ public sealed class SerialDeviceService : IDisposable
         }
     }
 
+    // Probes every COM port and keeps the one that answers with the device signature
     private async Task<bool> ConnectCoreAsync(CancellationToken ct)
     {
         DisposePort();
@@ -73,7 +74,7 @@ public sealed class SerialDeviceService : IDisposable
                     NewLine = "\n",
                     ReadTimeout = 2000,
                     WriteTimeout = 2000,
-                    DtrEnable = false,
+                    DtrEnable = false,   // avoid resetting the ATOM on open
                     RtsEnable = false
                 };
 
@@ -99,7 +100,7 @@ public sealed class SerialDeviceService : IDisposable
             }
             catch
             {
-                p?.Dispose();
+                p?.Dispose();   // not our device: try the next port
             }
         }
 

@@ -15,7 +15,7 @@ public sealed class CustomColorForm : Form
     private readonly Label _brightnessLabel = new() { AutoSize = true };
     private readonly Label _hexLabel = new() { AutoSize = true };
     private readonly Panel _swatch = new() { Width = 120, Height = 60, BorderStyle = BorderStyle.FixedSingle };
-    private readonly CheckBox _livePreview = new() { Text = "Vista previa en el ATOM", Checked = true, AutoSize = true };
+    private readonly CheckBox _livePreview = new() { Text = Strings.LivePreview, Checked = true, AutoSize = true };
     private readonly System.Windows.Forms.Timer _debounce = new() { Interval = 150 };
     private bool _loading;
 
@@ -26,7 +26,7 @@ public sealed class CustomColorForm : Form
     {
         _preview = preview;
 
-        Text = "Color personalizado";
+        Text = Strings.CustomTitle;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
         MinimizeBox = false;
@@ -34,9 +34,9 @@ public sealed class CustomColorForm : Form
         TopMost = true;
         ClientSize = new Size(370, 295);
 
-        var pick = new Button { Text = "Elegir color…", Width = 180, Location = new Point(160, 20) };
-        var apply = new Button { Text = "Aplicar", Width = 80, Location = new Point(180, 250), DialogResult = DialogResult.OK };
-        var cancel = new Button { Text = "Cancelar", Width = 80, Location = new Point(270, 250), DialogResult = DialogResult.Cancel };
+        var pick = new Button { Text = Strings.PickColor, Width = 180, Location = new Point(160, 20) };
+        var apply = new Button { Text = Strings.Apply, Width = 80, Location = new Point(180, 250), DialogResult = DialogResult.OK };
+        var cancel = new Button { Text = Strings.Cancel, Width = 80, Location = new Point(270, 250), DialogResult = DialogResult.Cancel };
 
         _swatch.Location = new Point(20, 20);
         _hexLabel.Location = new Point(160, 58);
@@ -53,14 +53,14 @@ public sealed class CustomColorForm : Form
             new Label { Text = "R", AutoSize = true, Location = new Point(20, 103) }, _r,
             new Label { Text = "G", AutoSize = true, Location = new Point(115, 103) }, _g,
             new Label { Text = "B", AutoSize = true, Location = new Point(210, 103) }, _b,
-            new Label { Text = "Brillo (10-100)", AutoSize = true, Location = new Point(20, 145) },
+            new Label { Text = Strings.Brightness, AutoSize = true, Location = new Point(20, 145) },
             _brightness, _brightnessLabel, _livePreview, apply, cancel
         });
 
         AcceptButton = apply;
         CancelButton = cancel;
 
-        // Valores iniciales
+        // Initial values
         _loading = true;
         var rgb = ParseHex(initialColor);
         _r.Value = (rgb >> 16) & 0xFF;
@@ -70,13 +70,13 @@ public sealed class CustomColorForm : Form
         _loading = false;
         UpdateDisplay();
 
-        // Eventos
+        // Events
         _r.ValueChanged += (_, _) => OnChanged();
         _g.ValueChanged += (_, _) => OnChanged();
         _b.ValueChanged += (_, _) => OnChanged();
         _brightness.ValueChanged += (_, _) =>
         {
-            var snapped = _brightness.Value / 5 * 5;
+            var snapped = _brightness.Value / 5 * 5;   // steps of 5
             if (snapped != _brightness.Value) { _brightness.Value = Math.Max(10, snapped); return; }
             OnChanged();
         };
@@ -116,7 +116,7 @@ public sealed class CustomColorForm : Form
 
         if (_livePreview.Checked)
         {
-            _debounce.Stop();
+            _debounce.Stop();   // wait until the user stops adjusting
             _debounce.Start();
         }
     }

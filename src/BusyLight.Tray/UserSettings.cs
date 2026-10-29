@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 
 namespace BusyLight.Tray;
 
+// User preferences, stored in %LOCALAPPDATA%\BusyLightStatus\usersettings.json
 public sealed class UserSettings
 {
     public AppMode Mode { get; set; } = AppMode.Auto;
@@ -10,10 +11,12 @@ public sealed class UserSettings
 
     public string CustomColor { get; set; } = "#00A0FF";
     public int CustomBrightness { get; set; } = 80;
-    public string TextMessage { get; set; } = "EN REUNION";
+
+    public string TextMessage { get; set; } = Strings.DefaultTextMessage;
     public string TextColor { get; set; } = "#00A0FF";
     public bool TextRandom { get; set; } = false;
     public int TextBrightness { get; set; } = 80;
+
     private static readonly string Folder = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BusyLightStatus");
 
@@ -33,7 +36,7 @@ public sealed class UserSettings
                 return JsonSerializer.Deserialize<UserSettings>(File.ReadAllText(FilePath), Options)
                        ?? new UserSettings();
         }
-        catch { /* archivo dañado: se usan valores por defecto */ }
+        catch { /* corrupted file: use defaults */ }
 
         return new UserSettings();
     }
@@ -45,6 +48,6 @@ public sealed class UserSettings
             Directory.CreateDirectory(Folder);
             File.WriteAllText(FilePath, JsonSerializer.Serialize(this, Options));
         }
-        catch { /* no bloquear la app si no se puede guardar */ }
+        catch { /* never block the app if settings cannot be saved */ }
     }
 }

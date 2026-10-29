@@ -14,7 +14,7 @@ public sealed class TrayApplicationContext : ApplicationContext
 
     private bool _graphAvailable;
     private AppMode _mode;
-    private string _last = "Iniciando";
+    private string _last = Strings.Starting;
 
     private readonly ToolStripMenuItem _autoItem;
     private readonly ToolStripMenuItem _manualItem;
@@ -26,12 +26,12 @@ public sealed class TrayApplicationContext : ApplicationContext
 
     private static readonly (ManualState State, string Text)[] ManualOptions =
     {
-        (ManualState.Available,    "Disponible"),
-        (ManualState.Busy,         "Ocupado"),
-        (ManualState.InAMeeting,   "En reunión"),
-        (ManualState.DoNotDisturb, "No molestar"),
-        (ManualState.Presenting,   "Presentando"),
-        (ManualState.Away,         "Ausente"),
+        (ManualState.Available,    Strings.StateAvailable),
+        (ManualState.Busy,         Strings.StateBusy),
+        (ManualState.InAMeeting,   Strings.StateInAMeeting),
+        (ManualState.DoNotDisturb, Strings.StateDoNotDisturb),
+        (ManualState.Presenting,   Strings.StatePresenting),
+        (ManualState.Away,         Strings.StateAway),
     };
 
     public TrayApplicationContext()
@@ -41,14 +41,14 @@ public sealed class TrayApplicationContext : ApplicationContext
         if (_graphAvailable) _graph = new GraphPresenceService(_config);
         _mode = _graphAvailable ? _settings.Mode : AppMode.Manual;
 
-        // Menú: Modo
-        _autoItem   = new ToolStripMenuItem("Automático (Teams)", null, async (_, _) => await SetModeAsync(AppMode.Auto));
-        _manualItem = new ToolStripMenuItem("Manual Use", null, async (_, _) => await SetModeAsync(AppMode.Manual));
-        var modeMenu = new ToolStripMenuItem("Modo");
+        // Menu: Mode
+        _autoItem   = new ToolStripMenuItem(Strings.MenuAuto, null, async (_, _) => await SetModeAsync(AppMode.Auto));
+        _manualItem = new ToolStripMenuItem(Strings.MenuManual, null, async (_, _) => await SetModeAsync(AppMode.Manual));
+        var modeMenu = new ToolStripMenuItem(Strings.MenuMode);
         modeMenu.DropDownItems.AddRange(new ToolStripItem[] { _autoItem, _manualItem });
 
-        // Menú: Estado manual
-        var stateMenu = new ToolStripMenuItem("Estado manual");
+        // Menu: Manual status
+        var stateMenu = new ToolStripMenuItem(Strings.MenuManualStatus);
         foreach (var (state, text) in ManualOptions)
         {
             var item = new ToolStripMenuItem(text, null, async (_, _) => await SelectManualStateAsync(state));
@@ -56,8 +56,8 @@ public sealed class TrayApplicationContext : ApplicationContext
             stateMenu.DropDownItems.Add(item);
         }
 
-        _customItem = new ToolStripMenuItem("Color personalizado…", null, async (_, _) => await OpenCustomColorAsync());
-        _textItem   = new ToolStripMenuItem("Mensaje de texto…", null, async (_, _) => await OpenTextMessageAsync());
+        _customItem = new ToolStripMenuItem(Strings.MenuCustomColor, null, async (_, _) => await OpenCustomColorAsync());
+        _textItem   = new ToolStripMenuItem(Strings.MenuTextMessage, null, async (_, _) => await OpenTextMessageAsync());
 
         var menu = new ContextMenuStrip();
         menu.Items.Add(modeMenu);
@@ -65,16 +65,16 @@ public sealed class TrayApplicationContext : ApplicationContext
         menu.Items.Add(_customItem);
         menu.Items.Add(_textItem);
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add("Actualizar ahora", null, async (_, _) => await SafeAsync(RefreshAsync));
-        menu.Items.Add("Reconectar dispositivo", null, async (_, _) => await SafeAsync(ReconnectAsync));
-        menu.Items.Add("Estado", null, (_, _) => MessageBox.Show(_last, "BusyLightStatus"));
+        menu.Items.Add(Strings.MenuRefresh, null, async (_, _) => await SafeAsync(RefreshAsync));
+        menu.Items.Add(Strings.MenuReconnect, null, async (_, _) => await SafeAsync(ReconnectAsync));
+        menu.Items.Add(Strings.MenuStatus, null, (_, _) => MessageBox.Show(_last, Strings.AppName));
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add("Salir", null, (_, _) => Exit());
+        menu.Items.Add(Strings.MenuExit, null, (_, _) => Exit());
 
         _icon = new NotifyIcon
         {
             Icon = LoadTrayIcon(),
-            Text = "BusyLightStatus",
+            Text = Strings.AppName,
             Visible = true,
             ContextMenuStrip = menu
         };
@@ -83,14 +83,14 @@ public sealed class TrayApplicationContext : ApplicationContext
         _ = RunAsync(_cts.Token);
     }
 
-    // ---------- Ciclo principal ----------
+    // ---------- Main loop ----------
 
     private async Task RunAsync(CancellationToken ct)
     {
         try
         {
             if (!_config.IsGraphConfigured)
-                Notify("Sin configuración de Entra ID. Se activó el modo Manual Use.");
+                Notify(Strings.ManualEnabledNotice(Strings.NoEntraConfig));
 
             if (_mode == AppMode.Auto)
                 await TrySignInAsync(ct);
@@ -98,31 +98,31 @@ public sealed class TrayApplicationContext : ApplicationContext
             await _serial.ConnectAsync(ct);
             await RefreshAsync(ct);
 
-            // Entre 10 y 30 s: en manual, el ping siempre llega antes del watchdog de 60 s
+            // 10-30 s: in manual mode the ping always arrives before the 60 s watchdog
             var interval = TimeSpan.FromSeconds(Math.Clamp(_config.PollSeconds, 10, 30));
 
             while (!ct.IsCancellationRequested)
             {
                 await Task.Delay(interval, ct);
 
-                if (_customOpen || _mode == AppMode.Manual) await KeepAliveAsync(ct);   // no pisar la vista previa
+                if (_customOpen || _mode == AppMode.Manual) await KeepAliveAsync(ct);   // don't overwrite the preview
                 else await UpdatePresenceAsync(ct);
             }
         }
         catch (OperationCanceledException) { }
-        catch (Exception ex) { SetStatus("Error: " + ex.Message); }
+        catch (Exception ex) { SetStatus(Strings.Error(ex.Message)); }
     }
 
     private Task RefreshAsync(CancellationToken ct) =>
         _mode == AppMode.Auto ? UpdatePresenceAsync(ct) : ApplyManualStateAsync(ct);
 
-    // ---------- Modo automático ----------
+    // ---------- Automatic mode ----------
 
     private async Task<bool> TrySignInAsync(CancellationToken ct)
     {
         if (_graph is null)
         {
-            DisableAuto("Sin configuración de Entra ID");
+            DisableAuto(Strings.NoEntraConfig);
             return false;
         }
 
@@ -134,12 +134,12 @@ public sealed class TrayApplicationContext : ApplicationContext
         catch (OperationCanceledException) { throw; }
         catch (Exception ex) when (IsAuthorizationProblem(ex))
         {
-            DisableAuto("Sin autorización para leer la presencia de Teams");
+            DisableAuto(Strings.NotAuthorized);
             return false;
         }
         catch (Exception ex)
         {
-            SetStatus("Error de inicio de sesión: " + ex.Message);   // temporal: sigue en automático
+            SetStatus(Strings.SignInError(ex.Message));   // transient: stays in automatic mode
             return false;
         }
     }
@@ -151,20 +151,20 @@ public sealed class TrayApplicationContext : ApplicationContext
         try
         {
             var p = await _graph.GetMyPresenceAsync(ct);
-            if (_mode != AppMode.Auto) return;   // el usuario cambió de modo mientras tanto
+            if (_mode != AppMode.Auto) return;   // user switched mode in the meantime
 
             await _serial.SendAsync(PresenceMapper.Map(p, _config.Brightness), ct);
-            SetStatus($"Automático: {p.Availability} / {p.Activity} | {_serial.PortName}");
+            SetStatus(Strings.StatusAuto(p.Availability, p.Activity, _serial.PortName));
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception ex) when (IsAuthorizationProblem(ex))
         {
-            DisableAuto("Sin autorización para leer la presencia de Teams");
+            DisableAuto(Strings.NotAuthorized);
             await ApplyManualStateAsync(ct);
         }
         catch (Exception ex)
         {
-            SetStatus("Error: " + ex.Message);   // red o Graph: reintenta en el próximo ciclo
+            SetStatus(Strings.Error(ex.Message));   // network or Graph: retry on next cycle
         }
     }
 
@@ -172,10 +172,10 @@ public sealed class TrayApplicationContext : ApplicationContext
     {
         MsalUiRequiredException => true,
         MsalClientException c when c.ErrorCode == MsalError.AuthenticationCanceledError => true,
-        MsalServiceException s when s.Message.Contains("AADSTS65001")    // sin consentimiento
-                                 || s.Message.Contains("AADSTS90094")    // requiere aprobación de admin
-                                 || s.Message.Contains("AADSTS50105")    // usuario no asignado
-                                 || s.Message.Contains("AADSTS700016")   // aplicación no encontrada
+        MsalServiceException s when s.Message.Contains("AADSTS65001")    // no consent
+                                 || s.Message.Contains("AADSTS90094")    // admin approval required
+                                 || s.Message.Contains("AADSTS50105")    // user not assigned
+                                 || s.Message.Contains("AADSTS700016")   // application not found
                                  => true,
         HttpRequestException h when h.StatusCode is HttpStatusCode.Forbidden
                                                  or HttpStatusCode.Unauthorized => true,
@@ -185,13 +185,13 @@ public sealed class TrayApplicationContext : ApplicationContext
     private void DisableAuto(string reason)
     {
         _graphAvailable = false;
-        _mode = AppMode.Manual;   // no se guarda: al reiniciar se vuelve a intentar Teams
-        SetStatus(reason + ". Modo Manual Use activo.");
-        Notify(reason + ". Se activó el modo Manual Use.");
+        _mode = AppMode.Manual;   // not saved: Teams is retried on next start
+        SetStatus(Strings.ManualActiveStatus(reason));
+        Notify(Strings.ManualEnabledNotice(reason));
         UpdateMenu();
     }
 
-    // ---------- Modo manual ----------
+    // ---------- Manual mode ----------
 
     private async Task ApplyManualStateAsync(CancellationToken ct)
     {
@@ -206,10 +206,10 @@ public sealed class TrayApplicationContext : ApplicationContext
             };
 
             await _serial.SendAsync(command, ct);
-            SetStatus($"Manual: {LabelOf(_settings.ManualState)} | {_serial.PortName}");
+            SetStatus(Strings.StatusManual(LabelOf(_settings.ManualState), _serial.PortName));
         }
         catch (OperationCanceledException) { throw; }
-        catch (Exception ex) { SetStatus("Error: " + ex.Message); }
+        catch (Exception ex) { SetStatus(Strings.Error(ex.Message)); }
     }
 
     private async Task KeepAliveAsync(CancellationToken ct)
@@ -217,13 +217,13 @@ public sealed class TrayApplicationContext : ApplicationContext
         try
         {
             var reconnected = await _serial.SendAsync(new PingCommand("ping"), ct);
-            if (reconnected) await RefreshAsync(ct);   // ATOM reconectado: reenviar estado
+            if (reconnected) await RefreshAsync(ct);   // ATOM reconnected: resend state
         }
         catch (OperationCanceledException) { throw; }
-        catch (Exception ex) { SetStatus("Error: " + ex.Message); }
+        catch (Exception ex) { SetStatus(Strings.Error(ex.Message)); }
     }
 
-    // ---------- Acciones del menú ----------
+    // ---------- Menu actions ----------
 
     private async Task SetModeAsync(AppMode mode)
     {
@@ -237,7 +237,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         await SafeAsync(async ct =>
         {
             if (mode == AppMode.Auto) await TrySignInAsync(ct);
-            await RefreshAsync(ct);   // si el inicio de sesión falló, ya está en manual
+            await RefreshAsync(ct);   // if sign-in failed, we are already in manual mode
         });
     }
 
@@ -270,7 +270,7 @@ public sealed class TrayApplicationContext : ApplicationContext
             }
             else
             {
-                await SafeAsync(RefreshAsync);   // Cancelar: vuelve al estado anterior
+                await SafeAsync(RefreshAsync);   // Cancel: restore previous state
             }
         }
         finally
@@ -289,7 +289,7 @@ public sealed class TrayApplicationContext : ApplicationContext
             using var form = new TextMessageForm(_settings.TextMessage, _settings.TextColor,
                                                  _settings.TextRandom, _settings.TextBrightness);
 
-            if (form.ShowDialog() != DialogResult.OK) return;   // Cancelar: no cambia nada
+            if (form.ShowDialog() != DialogResult.OK) return;   // Cancel: nothing changes
 
             _settings.TextMessage = form.MessageText;
             _settings.TextColor = form.SelectedColor;
@@ -308,7 +308,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         var ok = await _serial.ConnectAsync(ct);
         if (!ok)
         {
-            SetStatus("Dispositivo no encontrado");
+            SetStatus(Strings.DeviceNotFound);
             return;
         }
         await RefreshAsync(ct);
@@ -318,15 +318,15 @@ public sealed class TrayApplicationContext : ApplicationContext
     {
         try { await action(_cts.Token); }
         catch (OperationCanceledException) { }
-        catch (Exception ex) { SetStatus("Error: " + ex.Message); }
+        catch (Exception ex) { SetStatus(Strings.Error(ex.Message)); }
     }
 
-    // ---------- Interfaz ----------
+    // ---------- UI ----------
 
     private void UpdateMenu()
     {
         _autoItem.Enabled = _graphAvailable;
-        _autoItem.Text = _graphAvailable ? "Automático (Teams)" : "Automático (Teams) - no disponible";
+        _autoItem.Text = _graphAvailable ? Strings.MenuAuto : Strings.MenuAutoUnavailable;
         _autoItem.Checked = _mode == AppMode.Auto;
         _manualItem.Checked = _mode == AppMode.Manual;
 
@@ -339,13 +339,13 @@ public sealed class TrayApplicationContext : ApplicationContext
 
     private string LabelOf(ManualState state) => state switch
     {
-        ManualState.Custom => "Color personalizado",
-        ManualState.Text   => $"Mensaje \"{_settings.TextMessage}\"",
+        ManualState.Custom => Strings.StateCustom,
+        ManualState.Text   => Strings.StateText(_settings.TextMessage),
         _                  => ManualOptions.First(o => o.State == state).Text
     };
 
     private void Notify(string text) =>
-        _icon.ShowBalloonTip(5000, "BusyLightStatus", text, ToolTipIcon.Info);
+        _icon.ShowBalloonTip(5000, Strings.AppName, text, ToolTipIcon.Info);
 
     private static Icon LoadTrayIcon()
     {
@@ -363,7 +363,7 @@ public sealed class TrayApplicationContext : ApplicationContext
     private void SetStatus(string value)
     {
         _last = value;
-        _icon.Text = value.Length <= 63 ? value : value[..63];
+        _icon.Text = value.Length <= 63 ? value : value[..63];   // Windows tray tooltip limit
     }
 
     private void Exit()

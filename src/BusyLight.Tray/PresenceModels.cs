@@ -2,23 +2,23 @@ namespace BusyLight.Tray;
 
 public sealed record GraphPresence(string? Id, string Availability, string Activity);
 
-// Comando existente: matriz completa (modo automático)
+// Full matrix (automatic mode)
 public sealed record DeviceCommand(string Cmd, string Availability, string Activity,
     string Color, string Effect, byte Brightness);
 
-// Comando nuevo: patrón semáforo (FW 1.2.0+)
+// Traffic-light pattern (FW 1.2.0+)
 public sealed record LightsCommand(string Cmd, string Pattern, string Top, string Middle,
     string Bottom, string Effect, byte Brightness);
 
-// Matriz con patrón opcional ("rounded" = esquinas apagadas), FW 1.3.1+
+// Renews the watchdog without changing the LEDs (FW 1.2.0+)
+public sealed record PingCommand(string Cmd);
+
+// Matrix with optional pattern ("rounded" = corners off), FW 1.3.1+
 public sealed record PatternStatusCommand(string Cmd, string Pattern, string Color,
     string Effect, byte Brightness);
 
-// Texto letra por letra (FW 1.3.0+)
+// Scrolls text letter by letter (FW 1.3.0+)
 public sealed record TextCommand(string Cmd, string Text, string Color, bool Random, byte Brightness);
-
-// Comando nuevo: renueva el watchdog sin cambiar los LED (FW 1.2.0+)
-public sealed record PingCommand(string Cmd);
 
 public enum AppMode { Auto, Manual }
 

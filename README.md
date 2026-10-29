@@ -1,6 +1,6 @@
-# Busy Light Pilot: M5Stack ATOM Matrix + Microsoft Teams
+# Busy Light Status: M5Stack ATOM Matrix + Microsoft Teams
 
-Prototipo de una sola unidad. Incluye aplicación de bandeja para Windows en .NET 8, consulta de presencia propia mediante Microsoft Graph, conexión USB serial y firmware PlatformIO/Arduino.
+Prototipo con ATOM Matrix. Incluye aplicación de bandeja para Windows en .NET 8, consulta de presencia propia mediante Microsoft Graph, conexión USB serial y firmware PlatformIO/Arduino.
 
 ## 1. Preparación en Microsoft Entra ID
 
