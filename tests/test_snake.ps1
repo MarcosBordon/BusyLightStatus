@@ -1,5 +1,9 @@
 # Snake game test from PowerShell (FW 1.4.0+)
-# Arrows or WASD to play, Q to quit. Close the tray app first so the COM port is free.
+# Keys:  powershell -ExecutionPolicy Bypass -File .\tests\test_snake.ps1
+# Tilt:  powershell -ExecutionPolicy Bypass -File .\tests\test_snake.ps1 -Tilt
+# Arrows or WASD to play (also in tilt mode), Q to quit. Close the tray app first.
+
+param([switch]$Tilt)
 
 $port = New-Object System.IO.Ports.SerialPort COM3,115200,None,8,one
 $port.ReadTimeout = 2000
@@ -15,7 +19,10 @@ function Cmd($json) {
     try { return $port.ReadLine() } catch { return "no response" }
 }
 
-Write-Host "Start -> $(Cmd '{"Cmd":"gameStart","Speed":450}')"
+$control = if ($Tilt) { "tilt" } else { "keys" }
+if ($Tilt) { Write-Host "Hold the ATOM in the position you want as neutral..."; Start-Sleep -Seconds 2 }
+
+Write-Host "Start -> $(Cmd ('{"Cmd":"gameStart","Speed":450,"Control":"' + $control + '"}'))"
 Write-Host "Arrows or WASD to play, Q to quit."
 
 $last = ""

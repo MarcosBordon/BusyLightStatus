@@ -2,7 +2,7 @@
 #include <ArduinoJson.h>
 
 static const char* DEVICE_ID  = "BUSYLIGHT-ATOM";
-static const char* FW_VERSION = "1.4.0-beta";
+static const char* FW_VERSION = "1.4.0-beta.2";
 static const unsigned long WATCHDOG_MS = 60000UL;
 static const int MATRIX_LEDS = 25;
 
@@ -21,6 +21,15 @@ static const uint8_t GAME_BRIGHTNESS    = 80;     // % of M5Atom's safe brightne
 static const unsigned long GAME_OVER_FLASH_MS = 1500;
 static const uint32_t SNAKE_HEAD_COLOR      = 0xFFFF00;   // strong yellow
 static const uint8_t  SNAKE_HEAD_BRIGHTNESS = 100;        // %
+
+// Tilt control (MPU6886 accelerometer, values in g)
+static const float TILT_ON_G  = 0.34f;            // about 20°: turn
+static const float TILT_OFF_G = 0.15f;            // about 9°: back to neutral
+static const unsigned long TILT_READ_MS = 20;     // 50 readings per second
+// Axis mapping: adjust after running tests/test_tilt_axes.ps1
+static const bool TILT_SWAP_XY  = false;
+static const bool TILT_INVERT_X = false;
+static const bool TILT_INVERT_Y = false;
 
 enum Pattern { PATTERN_FULL, PATTERN_LIGHTS, PATTERN_ROUNDED };
 enum DisplayMode { BL_MODE_STATUS, BL_MODE_TEXT, BL_MODE_GAME };
@@ -108,6 +117,14 @@ GameStatus gameStatus    = GAME_OVER;
 unsigned long gameSpeedMs = GAME_DEFAULT_SPEED_MS;
 unsigned long lastStepMs  = 0;
 unsigned long gameEndMs   = 0;
+
+// Tilt control
+bool  imuOk       = false;
+bool  tiltControl = false;
+bool  tiltLatched = false;   // true until the ATOM returns near neutral
+float tiltBaseX   = 0;
+float tiltBaseY   = 0;
+unsigned long lastTiltMs = 0;
 
 uint32_t shown[MATRIX_LEDS];
 bool     shownValid = false;
@@ -249,6 +266,30 @@ void renderText(unsigned long now, uint32_t frame[MATRIX_LEDS])
             if (g[row] & (0x10 >> col)) frame[row * 5 + col] = c;
 }
 
+// ---------- Tilt sensor ----------
+
+bool readTilt(float& x, float& y, float& z)
+{
+    if (!imuOk) return false;
+    M5.IMU.getAccelData(&x, &y, &z);
+    return true;
+}
+
+// Takes the current position as neutral
+void tiltCalibrate()
+{
+    float sx = 0, sy = 0;
+    int n = 0;
+    for (int i = 0; i < 10; i++)
+    {
+        float x, y, z;
+        if (readTilt(x, y, z)) { sx += x; sy += y; n++; }
+        delay(5);
+    }
+    if (n > 0) { tiltBaseX = sx / n; tiltBaseY = sy / n; }
+    tiltLatched = false;
+}
+
 // ---------- Snake game ----------
 
 bool snakeOccupies(int pos, int count)
@@ -269,7 +310,7 @@ void placeApple()
     applePos = (n > 0) ? freeCells[random(0, n)] : -1;
 }
 
-void gameStart(int speedMs)
+void gameStart(int speedMs, bool useTilt)
 {
     snakeLen    = 2;
     snakePos[0] = 12;   // center, moving right
@@ -280,6 +321,10 @@ void gameStart(int speedMs)
     dirQueueLen = 0;
     gameSpeedMs = constrain(speedMs, GAME_MIN_SPEED_MS, GAME_MAX_SPEED_MS);
     gameStatus  = GAME_RUNNING;
+
+    tiltControl = useTilt && imuOk;   // falls back to keys if the sensor is missing
+    if (tiltControl) tiltCalibrate();
+
     lastStepMs  = millis();
     placeApple();
     mode = BL_MODE_GAME;
@@ -294,6 +339,39 @@ void gameQueueDir(int8_t dir)
     if (dir == last || dir == (last + 2) % 4) return;
 
     dirQueue[dirQueueLen++] = dir;
+}
+
+// Reads the tilt and turns the snake; needs a return to neutral between turns
+void tiltUpdate(unsigned long now)
+{
+    if (!tiltControl || mode != BL_MODE_GAME || gameStatus != GAME_RUNNING) return;
+    if (now - lastTiltMs < TILT_READ_MS) return;
+    lastTiltMs = now;
+
+    float x, y, z;
+    if (!readTilt(x, y, z)) return;
+
+    float dx = x - tiltBaseX;
+    float dy = y - tiltBaseY;
+    if (TILT_SWAP_XY)  { float t = dx; dx = dy; dy = t; }
+    if (TILT_INVERT_X) dx = -dx;
+    if (TILT_INVERT_Y) dy = -dy;
+
+    float adx = fabsf(dx);
+    float ady = fabsf(dy);
+
+    if (tiltLatched)
+    {
+        if (adx < TILT_OFF_G && ady < TILT_OFF_G) tiltLatched = false;
+        return;
+    }
+
+    if (adx < TILT_ON_G && ady < TILT_ON_G) return;
+
+    int8_t dir = (adx >= ady) ? (dx > 0 ? DIR_RIGHT : DIR_LEFT)
+                              : (dy > 0 ? DIR_DOWN  : DIR_UP);
+    gameQueueDir(dir);
+    tiltLatched = true;
 }
 
 void gameEnd(GameStatus result)
@@ -402,7 +480,7 @@ void renderGame(unsigned long now, uint32_t frame[MATRIX_LEDS])
     for (int i = snakeLen - 1; i > 0; i--)
         frame[snakePos[i]] = scaleColor(snakeCol[i], GAME_BRIGHTNESS * 55 / 100);
     if (snakeLen > 0)
-        frame[snakePos[0]] = scaleColor(SNAKE_HEAD_COLOR, SNAKE_HEAD_BRIGHTNESS);        
+        frame[snakePos[0]] = scaleColor(SNAKE_HEAD_COLOR, SNAKE_HEAD_BRIGHTNESS);
 }
 
 void reportGame()
@@ -410,7 +488,8 @@ void reportGame()
     const char* s = (gameStatus == GAME_RUNNING) ? "running"
                   : (gameStatus == GAME_WIN)     ? "win"
                   : "over";
-    Serial.printf("{\"status\":\"ok\",\"state\":\"%s\",\"length\":%d}\n", s, snakeLen);
+    Serial.printf("{\"status\":\"ok\",\"state\":\"%s\",\"length\":%d,\"control\":\"%s\"}\n",
+                  s, snakeLen, tiltControl ? "tilt" : "keys");
 }
 
 int8_t parseDir(const char* d)
@@ -538,7 +617,8 @@ void processLine(const String& line)
 
     if (!strcmp(cmd, "gameStart"))
     {
-        gameStart((int)(doc["Speed"] | GAME_DEFAULT_SPEED_MS));
+        const char* control = doc["Control"] | "keys";
+        gameStart((int)(doc["Speed"] | GAME_DEFAULT_SPEED_MS), !strcmp(control, "tilt"));
         lastCommandMs = millis();
         reportGame();
         return;
@@ -557,7 +637,7 @@ void processLine(const String& line)
             Serial.println("{\"status\":\"error\",\"reason\":\"invalid_dir\"}");
             return;
         }
-        gameQueueDir(dir);
+        gameQueueDir(dir);   // keys also work in tilt mode
         lastCommandMs = millis();
         reportGame();
         return;
@@ -578,8 +658,18 @@ void processLine(const String& line)
     if (!strcmp(cmd, "gameStop"))
     {
         if (mode == BL_MODE_GAME) mode = BL_MODE_STATUS;   // back to the last status
+        tiltControl = false;
         lastCommandMs = millis();
         Serial.println("{\"status\":\"ok\"}");
+        return;
+    }
+
+    if (!strcmp(cmd, "tiltRead"))
+    {
+        float x = 0, y = 0, z = 0;
+        bool ok = readTilt(x, y, z);
+        Serial.printf("{\"status\":\"ok\",\"imu\":%s,\"x\":%.2f,\"y\":%.2f,\"z\":%.2f}\n",
+                      ok ? "true" : "false", x, y, z);
         return;
     }
 
@@ -660,8 +750,9 @@ void render()
 
 void setup()
 {
-    M5.begin(true, false, true);   // Serial, no I2C, LED matrix
+    M5.begin(true, true, true);    // Serial, I2C (tilt sensor), LED matrix
     delay(50);
+    imuOk = (M5.IMU.Init() == 0);  // without the sensor, the game uses keys only
     randomSeed(esp_random());
     identify();
 }
@@ -670,6 +761,7 @@ void loop()
 {
     M5.update();
     readSerial();
+    tiltUpdate(millis());
     render();
     delay(5);
 }
