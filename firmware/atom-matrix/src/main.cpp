@@ -26,6 +26,7 @@ static const uint8_t  SNAKE_HEAD_BRIGHTNESS = 100;        // %
 static const float TILT_ON_G  = 0.34f;            // about 20°: turn
 static const float TILT_OFF_G = 0.15f;            // about 9°: back to neutral
 static const unsigned long TILT_READ_MS = 20;     // 50 readings per second
+
 // Axis mapping: adjust after running tests/test_tilt_axes.ps1
 static const bool TILT_SWAP_XY  = false;
 static const bool TILT_INVERT_X = false;
