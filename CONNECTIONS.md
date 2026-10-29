@@ -1,21 +1,26 @@
-# Lista de conexiones
+# Connections
 
-## Prototipo sin electrónica externa
+## Pilot with no external electronics
 
-| Origen | Destino | Función |
+| From | To | Purpose |
 |---|---|---|
-| PC Windows, USB-A o USB-C | USB-C del M5Stack ATOM Matrix | Alimentación de 5 V, programación y puerto serial |
-| ESP32 GPIO 27 | Matriz WS2812C integrada | Datos RGB, conexión interna de fábrica |
-| 5 V interno | Matriz RGB integrada | Alimentación, conexión interna de fábrica |
-| GND interno | Matriz RGB integrada | Referencia eléctrica, conexión interna de fábrica |
+| Windows PC, USB-A or USB-C | ATOM Matrix USB-C | 5 V power, flashing and serial port |
+| ESP32 GPIO 27 | Built-in WS2812C matrix | RGB data (factory wiring) |
+| Internal 5 V | Built-in RGB matrix | Power (factory wiring) |
+| Internal GND | Built-in RGB matrix | Ground (factory wiring) |
 
-No se requieren jumpers, protoboard, resistencias ni fuente separada para este piloto. Use un cable USB-C que soporte datos, no solo carga.
+No jumpers, breadboard, resistors or external power supply are needed. Use a USB-C cable that supports data, not charge-only.
 
-## Parámetros seriales
+## Serial settings
 
-- 115200 baudios
-- 8 bits de datos
-- Sin paridad
-- 1 bit de parada
-- Fin de línea: `\n`
-- Mensajes: JSON UTF-8, una línea por comando
+- 115200 baud
+- 8 data bits, no parity, 1 stop bit
+- Line ending: `\n`
+- One UTF-8 JSON command per line
+- DTR and RTS disabled, so the ATOM does not reset when the port opens
+
+## Libraries (firmware)
+
+- `m5stack/M5Atom`
+- `fastled/FastLED@3.6.0` (pinned: newer versions do not drive this matrix)
+- `bblanchon/ArduinoJson@^7.2.1`
