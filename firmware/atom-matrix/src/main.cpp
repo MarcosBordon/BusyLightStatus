@@ -1,8 +1,9 @@
 #include <M5Atom.h>
 #include <ArduinoJson.h>
+#include <Preferences.h>
 
 static const char* DEVICE_ID  = "BUSYLIGHT-ATOM";
-static const char* FW_VERSION = "1.4.0-beta.2";
+static const char* FW_VERSION = "1.4.0-beta.3";
 static const unsigned long WATCHDOG_MS = 60000UL;
 static const int MATRIX_LEDS = 25;
 
@@ -19,18 +20,27 @@ static const int  GAME_MIN_SPEED_MS     = 150;
 static const int  GAME_MAX_SPEED_MS     = 1000;
 static const uint8_t GAME_BRIGHTNESS    = 80;     // % of M5Atom's safe brightness
 static const unsigned long GAME_OVER_FLASH_MS = 1500;
+static const unsigned long GAME_WIN_SHOW_MS   = 3000;
 static const uint32_t SNAKE_HEAD_COLOR      = 0xFFFF00;   // strong yellow
 static const uint8_t  SNAKE_HEAD_BRIGHTNESS = 100;        // %
+static const uint32_t SCORE_COLOR           = 0xFFFFFF;   // white
+static const uint32_t SCORE_RECORD_COLOR    = 0xFFC000;   // gold: new best score
 
 // Tilt control (MPU6886 accelerometer, values in g)
 static const float TILT_ON_G  = 0.34f;            // about 20°: turn
 static const float TILT_OFF_G = 0.15f;            // about 9°: back to neutral
 static const unsigned long TILT_READ_MS = 20;     // 50 readings per second
-
 // Axis mapping: adjust after running tests/test_tilt_axes.ps1
 static const bool TILT_SWAP_XY  = false;
 static const bool TILT_INVERT_X = false;
 static const bool TILT_INVERT_Y = false;
+
+// Front button (the LED matrix itself, GPIO 39)
+static const unsigned long BTN_LONG_MS     = 2000;    // hold to start or exit the game
+static const unsigned long HINT_AFTER_MS   = 10000;   // hint starts 10 s after boot without PC
+static const unsigned long HINT_PERIOD_MS  = 6000;    // one green blink every 6 s
+static const unsigned long HINT_ON_MS      = 200;
+static const unsigned long NO_IMU_FLASH_MS = 1200;
 
 enum Pattern { PATTERN_FULL, PATTERN_LIGHTS, PATTERN_ROUNDED };
 enum DisplayMode { BL_MODE_STATUS, BL_MODE_TEXT, BL_MODE_GAME };
@@ -118,6 +128,21 @@ GameStatus gameStatus    = GAME_OVER;
 unsigned long gameSpeedMs = GAME_DEFAULT_SPEED_MS;
 unsigned long lastStepMs  = 0;
 unsigned long gameEndMs   = 0;
+bool       gamePaused    = false;
+
+// Standalone game (started with the front button, no PC)
+bool     standalone    = false;
+uint8_t  bestScore     = 0;          // saved in flash, survives power off
+bool     newRecord     = false;
+uint8_t  scoreCodes[4];
+int      scoreLen      = 0;
+Preferences prefs;
+
+// Front button
+bool  btnWasPressed = false;
+bool  btnLongFired  = false;
+unsigned long btnDownMs = 0;
+unsigned long noImuFlashUntil = 0;
 
 // Tilt control
 bool  imuOk       = false;
@@ -180,6 +205,12 @@ void pushFrame(const uint32_t frame[MATRIX_LEDS])
     shownValid = true;
 }
 
+// True while the tray app is talking to the ATOM
+bool pcActive(unsigned long now)
+{
+    return lastCommandMs != 0 && now - lastCommandMs < WATCHDOG_MS;
+}
+
 // ---------- Text ----------
 
 const uint8_t* findGlyph(uint8_t code)
@@ -189,6 +220,16 @@ const uint8_t* findGlyph(uint8_t code)
         if (BL_FONT[i].code == code) return BL_FONT[i].rows;
     }
     return nullptr;   // space or character without a glyph
+}
+
+// Draws one glyph into the frame
+void drawGlyph(uint32_t frame[MATRIX_LEDS], uint8_t code, uint32_t color)
+{
+    const uint8_t* g = findGlyph(code);
+    if (!g) return;
+    for (int row = 0; row < 5; row++)
+        for (int col = 0; col < 5; col++)
+            if (g[row] & (0x10 >> col)) frame[row * 5 + col] = color;
 }
 
 // Converts UTF-8 to font codes: uppercase, no accents, keeps Ñ
@@ -258,13 +299,7 @@ void renderText(unsigned long now, uint32_t frame[MATRIX_LEDS])
     if (t % TEXT_SLOT_MS >= TEXT_ON_MS) return;      // off between letters
 
     int idx = (int)(t / TEXT_SLOT_MS);
-    const uint8_t* g = findGlyph(textCodes[idx]);
-    if (!g) return;                                  // space
-
-    uint32_t c = scaleColor(textColors[idx], brightnessPct);
-    for (int row = 0; row < 5; row++)
-        for (int col = 0; col < 5; col++)
-            if (g[row] & (0x10 >> col)) frame[row * 5 + col] = c;
+    drawGlyph(frame, textCodes[idx], scaleColor(textColors[idx], brightnessPct));
 }
 
 // ---------- Tilt sensor ----------
@@ -322,6 +357,8 @@ void gameStart(int speedMs, bool useTilt)
     dirQueueLen = 0;
     gameSpeedMs = constrain(speedMs, GAME_MIN_SPEED_MS, GAME_MAX_SPEED_MS);
     gameStatus  = GAME_RUNNING;
+    gamePaused  = false;
+    newRecord   = false;
 
     tiltControl = useTilt && imuOk;   // falls back to keys if the sensor is missing
     if (tiltControl) tiltCalibrate();
@@ -334,7 +371,7 @@ void gameStart(int speedMs, bool useTilt)
 // Queues a direction; ignores 180° turns and repeated directions
 void gameQueueDir(int8_t dir)
 {
-    if (gameStatus != GAME_RUNNING || dirQueueLen >= 2) return;
+    if (gameStatus != GAME_RUNNING || gamePaused || dirQueueLen >= 2) return;
 
     int8_t last = (dirQueueLen > 0) ? dirQueue[dirQueueLen - 1] : snakeDir;
     if (dir == last || dir == (last + 2) % 4) return;
@@ -345,7 +382,7 @@ void gameQueueDir(int8_t dir)
 // Reads the tilt and turns the snake; needs a return to neutral between turns
 void tiltUpdate(unsigned long now)
 {
-    if (!tiltControl || mode != BL_MODE_GAME || gameStatus != GAME_RUNNING) return;
+    if (!tiltControl || mode != BL_MODE_GAME || gameStatus != GAME_RUNNING || gamePaused) return;
     if (now - lastTiltMs < TILT_READ_MS) return;
     lastTiltMs = now;
 
@@ -375,10 +412,27 @@ void tiltUpdate(unsigned long now)
     tiltLatched = true;
 }
 
+// Builds the score as font codes, e.g. "12"
+void buildScore()
+{
+    char buf[4];
+    snprintf(buf, sizeof(buf), "%d", snakeLen);
+    scoreLen = decodeText(buf, scoreCodes, 3);
+}
+
 void gameEnd(GameStatus result)
 {
     gameStatus = result;
     gameEndMs  = millis();
+
+    // Best score is kept in flash
+    if (snakeLen > bestScore)
+    {
+        bestScore = (uint8_t)snakeLen;
+        newRecord = true;
+        prefs.putUChar("best", bestScore);
+    }
+    buildScore();
 }
 
 void gameStep()
@@ -430,11 +484,22 @@ void gameStep()
     if (eats) placeApple();
 }
 
+// Score digits repeating: 400 ms on, 100 ms off, 1 s pause
+void renderScore(unsigned long elapsed, uint32_t frame[MATRIX_LEDS])
+{
+    unsigned long textMs  = (unsigned long)scoreLen * TEXT_SLOT_MS;
+    unsigned long t = elapsed % (textMs + TEXT_PAUSE_MS);
+    if (t >= textMs || t % TEXT_SLOT_MS >= TEXT_ON_MS) return;
+
+    uint32_t c = scaleColor(newRecord ? SCORE_RECORD_COLOR : SCORE_COLOR, GAME_BRIGHTNESS);
+    drawGlyph(frame, scoreCodes[t / TEXT_SLOT_MS], c);
+}
+
 void renderGame(unsigned long now, uint32_t frame[MATRIX_LEDS])
 {
     for (int i = 0; i < MATRIX_LEDS; i++) frame[i] = 0;
 
-    if (gameStatus == GAME_RUNNING)
+    if (gameStatus == GAME_RUNNING && !gamePaused)
     {
         while (now - lastStepMs >= gameSpeedMs && gameStatus == GAME_RUNNING)
         {
@@ -445,6 +510,12 @@ void renderGame(unsigned long now, uint32_t frame[MATRIX_LEDS])
 
     if (gameStatus == GAME_WIN)
     {
+        // Standalone: rainbow first, then the score
+        if (standalone && now - gameEndMs >= GAME_WIN_SHOW_MS)
+        {
+            renderScore(now - gameEndMs - GAME_WIN_SHOW_MS, frame);
+            return;
+        }
         // Moving rainbow over the full matrix
         for (int i = 0; i < MATRIX_LEDS; i++)
             frame[i] = scaleColor(hueToColor((uint8_t)(i * 10 + now / 8)), GAME_BRIGHTNESS);
@@ -453,17 +524,21 @@ void renderGame(unsigned long now, uint32_t frame[MATRIX_LEDS])
 
     if (gameStatus == GAME_OVER)
     {
-        // Red flash first, then the snake stays dim red
+        // Red flash first
         if (now - gameEndMs < GAME_OVER_FLASH_MS)
         {
             bool on = ((now - gameEndMs) / 250) % 2 == 0;
             uint32_t c = on ? scaleColor(0xFF0000, GAME_BRIGHTNESS) : 0;
             for (int i = 0; i < MATRIX_LEDS; i++) frame[i] = c;
         }
+        else if (standalone)
+        {
+            renderScore(now - gameEndMs - GAME_OVER_FLASH_MS, frame);   // no PC: show the score
+        }
         else
         {
             for (int i = 0; i < snakeLen; i++)
-                frame[snakePos[i]] = scaleColor(0xFF0000, 25);
+                frame[snakePos[i]] = scaleColor(0xFF0000, 25);          // the app shows the score
         }
         return;
     }
@@ -480,17 +555,20 @@ void renderGame(unsigned long now, uint32_t frame[MATRIX_LEDS])
     // Snake: body with random colors, head always strong yellow at full brightness
     for (int i = snakeLen - 1; i > 0; i--)
         frame[snakePos[i]] = scaleColor(snakeCol[i], GAME_BRIGHTNESS * 55 / 100);
-    if (snakeLen > 0)
+
+    // Paused: the head blinks
+    bool headOn = !gamePaused || (now / 400) % 2 == 0;
+    if (snakeLen > 0 && headOn)
         frame[snakePos[0]] = scaleColor(SNAKE_HEAD_COLOR, SNAKE_HEAD_BRIGHTNESS);
 }
 
 void reportGame()
 {
-    const char* s = (gameStatus == GAME_RUNNING) ? "running"
+    const char* s = (gameStatus == GAME_RUNNING) ? (gamePaused ? "paused" : "running")
                   : (gameStatus == GAME_WIN)     ? "win"
                   : "over";
-    Serial.printf("{\"status\":\"ok\",\"state\":\"%s\",\"length\":%d,\"control\":\"%s\"}\n",
-                  s, snakeLen, tiltControl ? "tilt" : "keys");
+    Serial.printf("{\"status\":\"ok\",\"state\":\"%s\",\"length\":%d,\"best\":%d,\"control\":\"%s\"}\n",
+                  s, snakeLen, bestScore, tiltControl ? "tilt" : "keys");
 }
 
 int8_t parseDir(const char* d)
@@ -500,6 +578,79 @@ int8_t parseDir(const char* d)
     if (!strcmp(d, "down"))  return DIR_DOWN;
     if (!strcmp(d, "left"))  return DIR_LEFT;
     return -1;
+}
+
+// ---------- Front button and standalone game ----------
+
+void standaloneStart()
+{
+    if (!imuOk)
+    {
+        noImuFlashUntil = millis() + NO_IMU_FLASH_MS;   // no sensor: no game without PC
+        return;
+    }
+    standalone = true;
+    gameStart(GAME_DEFAULT_SPEED_MS, true);
+}
+
+void standaloneExit()
+{
+    standalone  = false;
+    tiltControl = false;
+    mode        = BL_MODE_STATUS;   // back to the last status (blinking blue at boot)
+}
+
+void onShortPress()
+{
+    if (!standalone || mode != BL_MODE_GAME) return;
+
+    if (gameStatus == GAME_RUNNING)
+    {
+        gamePaused = !gamePaused;
+        if (!gamePaused)
+        {
+            lastStepMs = millis();   // resume without jumping ahead
+            tiltCalibrate();         // new neutral after the pause
+        }
+    }
+    else
+    {
+        standaloneStart();           // game ended: play again
+    }
+}
+
+void onLongPress(unsigned long now)
+{
+    if (standalone && mode == BL_MODE_GAME)
+    {
+        standaloneExit();
+        return;
+    }
+    if (pcActive(now)) return;       // the app controls the ATOM: ignore
+    standaloneStart();
+}
+
+// Short press on release, long press after 2 s while held
+void buttonUpdate(unsigned long now)
+{
+    bool pressed = M5.Btn.isPressed();
+
+    if (pressed && !btnWasPressed)
+    {
+        btnDownMs    = now;
+        btnLongFired = false;
+    }
+    else if (pressed && !btnLongFired && now - btnDownMs >= BTN_LONG_MS)
+    {
+        btnLongFired = true;
+        onLongPress(now);
+    }
+    else if (!pressed && btnWasPressed && !btnLongFired)
+    {
+        onShortPress();
+    }
+
+    btnWasPressed = pressed;
 }
 
 // ---------- Status / traffic light ----------
@@ -589,6 +740,7 @@ void processLine(const String& line)
         effect        = String((const char*)(doc["Effect"] | "solid"));
         brightnessPct = constrain((int)(doc["Brightness"] | 100), 10, 100);
         mode          = BL_MODE_STATUS;
+        standalone    = false;   // the app takes over
         lastCommandMs = millis();
         Serial.println("{\"status\":\"ok\"}");
         return;
@@ -611,6 +763,7 @@ void processLine(const String& line)
         textStartMs   = millis();
         textCycle     = -1;
         mode          = BL_MODE_TEXT;
+        standalone    = false;   // the app takes over
         lastCommandMs = millis();
         Serial.printf("{\"status\":\"ok\",\"chars\":%d}\n", n);
         return;
@@ -619,6 +772,7 @@ void processLine(const String& line)
     if (!strcmp(cmd, "gameStart"))
     {
         const char* control = doc["Control"] | "keys";
+        standalone = false;
         gameStart((int)(doc["Speed"] | GAME_DEFAULT_SPEED_MS), !strcmp(control, "tilt"));
         lastCommandMs = millis();
         reportGame();
@@ -660,6 +814,7 @@ void processLine(const String& line)
     {
         if (mode == BL_MODE_GAME) mode = BL_MODE_STATUS;   // back to the last status
         tiltControl = false;
+        standalone  = false;
         lastCommandMs = millis();
         Serial.println("{\"status\":\"ok\"}");
         return;
@@ -702,8 +857,18 @@ void render()
     unsigned long now = millis();
     uint32_t frame[MATRIX_LEDS];
 
-    // Watchdog: no commands for 60 s -> dim blinking blue
-    if (lastCommandMs != 0 && now - lastCommandMs > WATCHDOG_MS)
+    // No tilt sensor: short red flash when trying to start the standalone game
+    if (now < noImuFlashUntil)
+    {
+        bool on = (now / 200) % 2 == 0;
+        uint32_t c = on ? scaleColor(0xFF0000, 50) : 0;
+        for (int i = 0; i < MATRIX_LEDS; i++) frame[i] = c;
+        pushFrame(frame);
+        return;
+    }
+
+    // Watchdog: no commands for 60 s -> dim blinking blue (not during a standalone game)
+    if (!standalone && lastCommandMs != 0 && now - lastCommandMs > WATCHDOG_MS)
     {
         bool on = (now / 500) % 2 == 0;
         uint32_t c = on ? scaleColor(0x0000FF, 40) : 0;
@@ -746,6 +911,11 @@ void render()
     }
 
     buildFrame(frame, (uint8_t)((uint16_t)brightnessPct * level / 100));
+
+    // Hint without PC: a short green blink in the center invites to hold the button
+    if (lastCommandMs == 0 && imuOk && now > HINT_AFTER_MS && now % HINT_PERIOD_MS < HINT_ON_MS)
+        frame[12] = scaleColor(0x00FF00, GAME_BRIGHTNESS);
+
     pushFrame(frame);
 }
 
@@ -754,15 +924,19 @@ void setup()
     M5.begin(true, true, true);    // Serial, I2C (tilt sensor), LED matrix
     delay(50);
     imuOk = (M5.IMU.Init() == 0);  // without the sensor, the game uses keys only
+    prefs.begin("busylight", false);
+    bestScore = prefs.getUChar("best", 0);
     randomSeed(esp_random());
     identify();
 }
 
 void loop()
 {
+    unsigned long now = millis();
     M5.update();
     readSerial();
-    tiltUpdate(millis());
+    buttonUpdate(now);
+    tiltUpdate(now);
     render();
     delay(5);
 }
