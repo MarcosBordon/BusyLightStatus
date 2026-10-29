@@ -20,6 +20,11 @@ public sealed record PatternStatusCommand(string Cmd, string Pattern, string Col
 // Scrolls text letter by letter (FW 1.3.0+)
 public sealed record TextCommand(string Cmd, string Text, string Color, bool Random, byte Brightness);
 
+// Snake game (FW 1.4.0+)
+public sealed record GameStartCommand(string Cmd, int Speed, string Control);   // Control: "keys" or "tilt"
+public sealed record GameDirCommand(string Cmd, string Dir);                     // Dir: up, down, left, right
+public sealed record GameCommand(string Cmd);                                   // gameState, gameStop
+
 public enum AppMode { Auto, Manual }
 
 public enum ManualState { Available, Busy, InAMeeting, DoNotDisturb, Presenting, Away, Custom, Text }

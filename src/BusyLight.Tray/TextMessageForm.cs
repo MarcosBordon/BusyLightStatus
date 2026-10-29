@@ -31,6 +31,9 @@ public sealed class TextMessageForm : Form
     public bool SelectedRandom => _random.Checked;
     public int SelectedBrightness => _brightness.Value;
 
+    // True when the user typed the hidden word: open the game instead of sending
+    public bool IsEasterEgg { get; private set; }
+
     public TextMessageForm(string initialText, string initialColor, bool initialRandom, int initialBrightness)
     {
         _color = IsHex(initialColor) ? initialColor : "#00A0FF";
@@ -90,6 +93,14 @@ public sealed class TextMessageForm : Form
         };
         send.Click += (_, _) =>
         {
+            // Hidden game
+            if (MessageText.Trim() == Strings.EasterEggWord)
+            {
+                IsEasterEgg = true;
+                DialogResult = DialogResult.OK;
+                return;
+            }
+
             if (string.IsNullOrWhiteSpace(MessageText))
             {
                 MessageBox.Show(this, Strings.TextRequired, Strings.TextTitle,

@@ -48,6 +48,7 @@ public static class Strings
     public const string Apply  = "Apply";
     public const string Cancel = "Cancel";
     public const string Send   = "Send";
+    public const string Close  = "Close";
 
     // ---------- Custom color window ----------
     public const string CustomTitle = "Custom color";
@@ -65,4 +66,19 @@ public static class Strings
     public const string DefaultTextMessage = "IN A MEETING";
     public static string TextLabel(int max) => $"Message (max. {max} characters)";
     public static string Preview(string text) => $"Preview: {text}";
+
+    // ---------- Snake game (hidden) ----------
+    public const string EasterEggWord = "SNAKE";
+    public const string GameTitle     = "Snake";
+    public const string GameHelp      = "Arrow keys or WASD to play.\nEat the green apples and fill all 25 LEDs.";
+    public const string GameTilt      = "Tilt control (tilt the ATOM to turn)";
+    public const string GameStart     = "Start";
+    public const string GameRestart   = "Restart";
+    public const string GameReady     = "Press Start to play.";
+    public const string GameRunning   = "Playing…";
+    public const string GameOver      = "Game over!";
+    public const string GameWin       = "You win! All 25 LEDs are on.";
+    public const string GameNoTilt    = "Tilt sensor not available: using keys.";
+    public static string GameLength(int n) => $"Length: {n} / 25";
+    public static string GameBest(int n) => $"Best: {n}";
 }

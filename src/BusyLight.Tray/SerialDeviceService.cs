@@ -57,6 +57,42 @@ public sealed class SerialDeviceService : IDisposable
         }
     }
 
+    // Sends a command and returns the device's one-line reply (null if no device or no reply)
+    public async Task<string?> SendAndReadAsync(object command, CancellationToken ct = default)
+    {
+        await _lock.WaitAsync(ct);
+        try
+        {
+            if (_port is not { IsOpen: true } && !await ConnectCoreAsync(ct))
+                return null;
+
+            var port = _port!;
+            try
+            {
+                port.DiscardInBuffer();
+                port.WriteLine(JsonSerializer.Serialize(command, command.GetType()));
+                return await Task.Run(() => port.ReadLine(), ct);
+            }
+            catch (TimeoutException)
+            {
+                return null;   // device busy or old firmware: keep the port open
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch
+            {
+                DisposePort();
+                throw;
+            }
+        }
+        finally
+        {
+            _lock.Release();
+        }
+    }
+
     // Probes every COM port and keeps the one that answers with the device signature
     private async Task<bool> ConnectCoreAsync(CancellationToken ct)
     {
