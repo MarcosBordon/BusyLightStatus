@@ -2,7 +2,7 @@
 #include <ArduinoJson.h>
 
 static const char* DEVICE_ID  = "BUSYLIGHT-ATOM";
-static const char* FW_VERSION = "1.3.1";
+static const char* FW_VERSION = "1.4.0-beta";
 static const unsigned long WATCHDOG_MS = 60000UL;
 static const int MATRIX_LEDS = 25;
 
@@ -13,8 +13,19 @@ static const unsigned long TEXT_ON_MS    = 400;   // letter on (then 100 ms off)
 static const unsigned long TEXT_PAUSE_MS = 1000;  // pause between repetitions
 static const uint8_t CHAR_ENYE = 0x01;            // internal code for Ñ
 
+// Snake game
+static const int  GAME_DEFAULT_SPEED_MS = 450;    // one step every 450 ms
+static const int  GAME_MIN_SPEED_MS     = 150;
+static const int  GAME_MAX_SPEED_MS     = 1000;
+static const uint8_t GAME_BRIGHTNESS    = 80;     // % of M5Atom's safe brightness
+static const unsigned long GAME_OVER_FLASH_MS = 1500;
+static const uint32_t SNAKE_HEAD_COLOR      = 0xFFFF00;   // strong yellow
+static const uint8_t  SNAKE_HEAD_BRIGHTNESS = 100;        // %
+
 enum Pattern { PATTERN_FULL, PATTERN_LIGHTS, PATTERN_ROUNDED };
-enum DisplayMode { BL_MODE_STATUS, BL_MODE_TEXT };
+enum DisplayMode { BL_MODE_STATUS, BL_MODE_TEXT, BL_MODE_GAME };
+enum GameStatus { GAME_RUNNING, GAME_OVER, GAME_WIN };
+enum GameDir { DIR_UP = 0, DIR_RIGHT = 1, DIR_DOWN = 2, DIR_LEFT = 3 };
 
 // ---------- 5x5 font (bit 4 = left column) ----------
 
@@ -85,6 +96,19 @@ bool     textRandom  = false;
 unsigned long textStartMs = 0;
 long     textCycle   = -1;
 
+// Snake game (index 0 = head)
+uint8_t    snakePos[MATRIX_LEDS];
+uint32_t   snakeCol[MATRIX_LEDS];
+int        snakeLen      = 0;
+int8_t     snakeDir      = DIR_RIGHT;
+int8_t     dirQueue[2];
+int        dirQueueLen   = 0;
+int        applePos      = -1;
+GameStatus gameStatus    = GAME_OVER;
+unsigned long gameSpeedMs = GAME_DEFAULT_SPEED_MS;
+unsigned long lastStepMs  = 0;
+unsigned long gameEndMs   = 0;
+
 uint32_t shown[MATRIX_LEDS];
 bool     shownValid = false;
 String   rxBuffer;
@@ -105,11 +129,25 @@ uint32_t parseHex(const char* hex, uint32_t fallback)
     return strtoul(hex + 1, nullptr, 16);
 }
 
-uint32_t randomVividColor()
+uint32_t hueToColor(uint8_t hue)
 {
     CRGB c;
-    hsv2rgb_rainbow(CHSV((uint8_t)random(0, 256), 255, 255), c);
+    hsv2rgb_rainbow(CHSV(hue, 255, 255), c);
     return ((uint32_t)c.r << 16) | ((uint32_t)c.g << 8) | c.b;
+}
+
+uint32_t randomVividColor()
+{
+    return hueToColor((uint8_t)random(0, 256));
+}
+
+// Random vivid color without yellow or green tones
+// (yellow is reserved for the head, green for the apple)
+uint32_t randomSnakeColor()
+{
+    uint8_t hue;
+    do { hue = (uint8_t)random(0, 256); } while (hue >= 48 && hue <= 140);
+    return hueToColor(hue);
 }
 
 // Sends the frame to the matrix only if it changed
@@ -209,6 +247,179 @@ void renderText(unsigned long now, uint32_t frame[MATRIX_LEDS])
     for (int row = 0; row < 5; row++)
         for (int col = 0; col < 5; col++)
             if (g[row] & (0x10 >> col)) frame[row * 5 + col] = c;
+}
+
+// ---------- Snake game ----------
+
+bool snakeOccupies(int pos, int count)
+{
+    for (int i = 0; i < count; i++)
+        if (snakePos[i] == pos) return true;
+    return false;
+}
+
+// Puts the apple on a random free cell
+void placeApple()
+{
+    int freeCells[MATRIX_LEDS];
+    int n = 0;
+    for (int p = 0; p < MATRIX_LEDS; p++)
+        if (!snakeOccupies(p, snakeLen)) freeCells[n++] = p;
+
+    applePos = (n > 0) ? freeCells[random(0, n)] : -1;
+}
+
+void gameStart(int speedMs)
+{
+    snakeLen    = 2;
+    snakePos[0] = 12;   // center, moving right
+    snakePos[1] = 11;
+    snakeCol[0] = randomSnakeColor();
+    snakeCol[1] = randomSnakeColor();
+    snakeDir    = DIR_RIGHT;
+    dirQueueLen = 0;
+    gameSpeedMs = constrain(speedMs, GAME_MIN_SPEED_MS, GAME_MAX_SPEED_MS);
+    gameStatus  = GAME_RUNNING;
+    lastStepMs  = millis();
+    placeApple();
+    mode = BL_MODE_GAME;
+}
+
+// Queues a direction; ignores 180° turns and repeated directions
+void gameQueueDir(int8_t dir)
+{
+    if (gameStatus != GAME_RUNNING || dirQueueLen >= 2) return;
+
+    int8_t last = (dirQueueLen > 0) ? dirQueue[dirQueueLen - 1] : snakeDir;
+    if (dir == last || dir == (last + 2) % 4) return;
+
+    dirQueue[dirQueueLen++] = dir;
+}
+
+void gameEnd(GameStatus result)
+{
+    gameStatus = result;
+    gameEndMs  = millis();
+}
+
+void gameStep()
+{
+    if (dirQueueLen > 0)
+    {
+        snakeDir = dirQueue[0];
+        dirQueue[0] = dirQueue[1];
+        dirQueueLen--;
+    }
+
+    // Next head position; edges wrap around
+    int row = snakePos[0] / 5;
+    int col = snakePos[0] % 5;
+    switch (snakeDir)
+    {
+        case DIR_UP:    row = (row + 4) % 5; break;
+        case DIR_RIGHT: col = (col + 1) % 5; break;
+        case DIR_DOWN:  row = (row + 1) % 5; break;
+        default:        col = (col + 4) % 5; break;
+    }
+    int next = row * 5 + col;
+    bool eats = (next == applePos);
+
+    // The tail moves away on this step unless the snake grows
+    if (snakeOccupies(next, eats ? snakeLen : snakeLen - 1))
+    {
+        gameEnd(GAME_OVER);
+        return;
+    }
+
+    // Grows by one LED with a new random color at the tail
+    if (eats)
+    {
+        snakeCol[snakeLen] = randomSnakeColor();
+        snakeLen++;
+    }
+
+    for (int i = snakeLen - 1; i > 0; i--) snakePos[i] = snakePos[i - 1];
+    snakePos[0] = next;
+
+    if (snakeLen >= MATRIX_LEDS)
+    {
+        applePos = -1;
+        gameEnd(GAME_WIN);
+        return;
+    }
+
+    if (eats) placeApple();
+}
+
+void renderGame(unsigned long now, uint32_t frame[MATRIX_LEDS])
+{
+    for (int i = 0; i < MATRIX_LEDS; i++) frame[i] = 0;
+
+    if (gameStatus == GAME_RUNNING)
+    {
+        while (now - lastStepMs >= gameSpeedMs && gameStatus == GAME_RUNNING)
+        {
+            lastStepMs += gameSpeedMs;
+            gameStep();
+        }
+    }
+
+    if (gameStatus == GAME_WIN)
+    {
+        // Moving rainbow over the full matrix
+        for (int i = 0; i < MATRIX_LEDS; i++)
+            frame[i] = scaleColor(hueToColor((uint8_t)(i * 10 + now / 8)), GAME_BRIGHTNESS);
+        return;
+    }
+
+    if (gameStatus == GAME_OVER)
+    {
+        // Red flash first, then the snake stays dim red
+        if (now - gameEndMs < GAME_OVER_FLASH_MS)
+        {
+            bool on = ((now - gameEndMs) / 250) % 2 == 0;
+            uint32_t c = on ? scaleColor(0xFF0000, GAME_BRIGHTNESS) : 0;
+            for (int i = 0; i < MATRIX_LEDS; i++) frame[i] = c;
+        }
+        else
+        {
+            for (int i = 0; i < snakeLen; i++)
+                frame[snakePos[i]] = scaleColor(0xFF0000, 25);
+        }
+        return;
+    }
+
+    // Apple: pulsing green
+    if (applePos >= 0)
+    {
+        unsigned long t = now % 1000;
+        uint8_t level = (t < 500) ? 30 + t * 70 / 500 : 30 + (1000 - t) * 70 / 500;
+        level = (level / 5) * 5;
+        frame[applePos] = scaleColor(0x00FF00, (uint8_t)((uint16_t)GAME_BRIGHTNESS * level / 100));
+    }
+
+    // Snake: body with random colors, head always strong yellow at full brightness
+    for (int i = snakeLen - 1; i > 0; i--)
+        frame[snakePos[i]] = scaleColor(snakeCol[i], GAME_BRIGHTNESS * 55 / 100);
+    if (snakeLen > 0)
+        frame[snakePos[0]] = scaleColor(SNAKE_HEAD_COLOR, SNAKE_HEAD_BRIGHTNESS);        
+}
+
+void reportGame()
+{
+    const char* s = (gameStatus == GAME_RUNNING) ? "running"
+                  : (gameStatus == GAME_WIN)     ? "win"
+                  : "over";
+    Serial.printf("{\"status\":\"ok\",\"state\":\"%s\",\"length\":%d}\n", s, snakeLen);
+}
+
+int8_t parseDir(const char* d)
+{
+    if (!strcmp(d, "up"))    return DIR_UP;
+    if (!strcmp(d, "right")) return DIR_RIGHT;
+    if (!strcmp(d, "down"))  return DIR_DOWN;
+    if (!strcmp(d, "left"))  return DIR_LEFT;
+    return -1;
 }
 
 // ---------- Status / traffic light ----------
@@ -325,6 +536,53 @@ void processLine(const String& line)
         return;
     }
 
+    if (!strcmp(cmd, "gameStart"))
+    {
+        gameStart((int)(doc["Speed"] | GAME_DEFAULT_SPEED_MS));
+        lastCommandMs = millis();
+        reportGame();
+        return;
+    }
+
+    if (!strcmp(cmd, "gameDir"))
+    {
+        if (mode != BL_MODE_GAME)
+        {
+            Serial.println("{\"status\":\"error\",\"reason\":\"not_in_game\"}");
+            return;
+        }
+        int8_t dir = parseDir(doc["Dir"] | "");
+        if (dir < 0)
+        {
+            Serial.println("{\"status\":\"error\",\"reason\":\"invalid_dir\"}");
+            return;
+        }
+        gameQueueDir(dir);
+        lastCommandMs = millis();
+        reportGame();
+        return;
+    }
+
+    if (!strcmp(cmd, "gameState"))
+    {
+        if (mode != BL_MODE_GAME)
+        {
+            Serial.println("{\"status\":\"error\",\"reason\":\"not_in_game\"}");
+            return;
+        }
+        lastCommandMs = millis();   // also renews the watchdog
+        reportGame();
+        return;
+    }
+
+    if (!strcmp(cmd, "gameStop"))
+    {
+        if (mode == BL_MODE_GAME) mode = BL_MODE_STATUS;   // back to the last status
+        lastCommandMs = millis();
+        Serial.println("{\"status\":\"ok\"}");
+        return;
+    }
+
     Serial.println("{\"status\":\"error\",\"reason\":\"unknown_command\"}");
 }
 
@@ -359,6 +617,13 @@ void render()
         bool on = (now / 500) % 2 == 0;
         uint32_t c = on ? scaleColor(0x0000FF, 40) : 0;
         for (int i = 0; i < MATRIX_LEDS; i++) frame[i] = c;
+        pushFrame(frame);
+        return;
+    }
+
+    if (mode == BL_MODE_GAME)
+    {
+        renderGame(now, frame);
         pushFrame(frame);
         return;
     }
