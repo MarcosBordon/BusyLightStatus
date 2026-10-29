@@ -3,7 +3,7 @@
 Busy light for Microsoft Teams built on an **M5Stack ATOM Matrix** (ESP32, 5×5 RGB LEDs) and a **Windows tray app in .NET 8**. It helps people in meetings avoid interruptions.
 
 <p align="center">
-  <img src="busylightstatus.gif" alt="BUSY LIGHT STATUS on the ATOM Matrix" width="240">
+  <img src="busylightstatus-v2.gif" alt="BUSY LIGHT STATUS on the ATOM Matrix" width="240">
 </p>
 
 ## Features
