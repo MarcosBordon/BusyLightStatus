@@ -2,6 +2,10 @@
 
 Busy light for Microsoft Teams built on an **M5Stack ATOM Matrix** (ESP32, 5×5 RGB LEDs) and a **Windows tray app in .NET 8**. It helps people in meetings avoid interruptions.
 
+<p align="center">
+  <img src="busylightstatus.gif" alt="BUSY LIGHT STATUS on the ATOM Matrix" width="240">
+</p>
+
 ## Features
 
 - **Automatic (Teams):** reads your own presence through Microsoft Graph and shows it on the ATOM.
@@ -17,6 +21,8 @@ Busy light for Microsoft Teams built on an **M5Stack ATOM Matrix** (ESP32, 5×5 
 | Board | M5Stack ATOM Matrix (ESP32-PICO-D4, 25 WS2812C LEDs on GPIO 27) |
 | Cable | USB-C with data support |
 | Extra wiring | None |
+
+M5STACK page: `https://docs.m5stack.com/en/core/Atom-Matrix`
 
 See [CONNECTIONS.md](CONNECTIONS.md) and [DIAGRAM.md](DIAGRAM.md).
 
@@ -100,7 +106,7 @@ Effects: `solid`, `pulse`, `doublepulse`, `blink`.
 
 ## Tests
 
-Close the app first, so the COM port is free.
+Close the app first, so COM3 is free.
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\tests\test_regression.ps1
