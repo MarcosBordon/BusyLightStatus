@@ -29,7 +29,7 @@ See [CONNECTIONS.md](CONNECTIONS.md) and [DIAGRAM.md](DIAGRAM.md).
 ## Repository structure
 
 ```text
-firmware/atom-matrix/   PlatformIO firmware (FW 1.3.1)
+firmware/atom-matrix/   PlatformIO firmware (FW 1.4.0)
 src/BusyLight.Tray/     .NET 8 tray app
 tests/                  PowerShell serial tests
 ```
@@ -118,6 +118,15 @@ powershell -ExecutionPolicy Bypass -File .\tests\test_regression.ps1
 | `test_lights_ping.ps1` | Traffic-light pattern and watchdog renewal |
 | `test_text.ps1` | Text, Ñ, accents, 15-character limit |
 | `test_rounded.ps1` | Manual statuses with corners off |
+
+## 🥚 Something is hiding
+
+> Not every message is meant to be read.
+> One of them wakes something up: it moves without a sound, grows with every apple it finds,
+> and won't rest until the whole light is full.
+> If you can name it, the light will play along.
+>
+> No computer around? They say the light answers to those who are patient with it.
 
 ## Privacy and security
 

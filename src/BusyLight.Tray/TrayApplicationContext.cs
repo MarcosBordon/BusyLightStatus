@@ -23,6 +23,7 @@ public sealed class TrayApplicationContext : ApplicationContext
     private readonly Dictionary<ManualState, ToolStripMenuItem> _stateItems = new();
     private bool _customOpen;
     private bool _textOpen;
+    private bool _gameOpen;
 
     private static readonly (ManualState State, string Text)[] ManualOptions =
     {
@@ -104,6 +105,8 @@ public sealed class TrayApplicationContext : ApplicationContext
             while (!ct.IsCancellationRequested)
             {
                 await Task.Delay(interval, ct);
+
+                if (_gameOpen) continue;   // the game window polls the ATOM itself
 
                 if (_customOpen || _mode == AppMode.Manual) await KeepAliveAsync(ct);   // don't overwrite the preview
                 else await UpdatePresenceAsync(ct);
@@ -286,20 +289,53 @@ public sealed class TrayApplicationContext : ApplicationContext
 
         try
         {
-            using var form = new TextMessageForm(_settings.TextMessage, _settings.TextColor,
-                                                 _settings.TextRandom, _settings.TextBrightness);
+            bool easterEgg;
 
-            if (form.ShowDialog() != DialogResult.OK) return;   // Cancel: nothing changes
+            using (var form = new TextMessageForm(_settings.TextMessage, _settings.TextColor,
+                                                  _settings.TextRandom, _settings.TextBrightness))
+            {
+                if (form.ShowDialog() != DialogResult.OK) return;   // Cancel: nothing changes
 
-            _settings.TextMessage = form.MessageText;
-            _settings.TextColor = form.SelectedColor;
-            _settings.TextRandom = form.SelectedRandom;
-            _settings.TextBrightness = form.SelectedBrightness;
-            await SelectManualStateAsync(ManualState.Text);
+                easterEgg = form.IsEasterEgg;
+                if (!easterEgg)
+                {
+                    _settings.TextMessage = form.MessageText;
+                    _settings.TextColor = form.SelectedColor;
+                    _settings.TextRandom = form.SelectedRandom;
+                    _settings.TextBrightness = form.SelectedBrightness;
+                }
+            }
+
+            // Hidden game: "SNAKE" is never saved as the message
+            if (easterEgg) await OpenSnakeGameAsync();
+            else await SelectManualStateAsync(ManualState.Text);
         }
         finally
         {
             _textOpen = false;
+        }
+    }
+
+    private async Task OpenSnakeGameAsync()
+    {
+        if (_gameOpen) return;
+        _gameOpen = true;
+
+        try
+        {
+            using var form = new SnakeGameForm(command => _serial.SendAndReadAsync(command, _cts.Token));
+            form.ShowDialog();
+        }
+        finally
+        {
+            _gameOpen = false;
+
+            // Stop the game and restore the previous state (manual or Teams)
+            await SafeAsync(async ct =>
+            {
+                await _serial.SendAsync(new GameCommand("gameStop"), ct);
+                await RefreshAsync(ct);
+            });
         }
     }
 
