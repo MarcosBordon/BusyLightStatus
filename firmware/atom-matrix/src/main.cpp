@@ -3,7 +3,7 @@
 #include <Preferences.h>
 
 static const char* DEVICE_ID  = "BUSYLIGHT-ATOM";
-static const char* FW_VERSION = "1.4.0-beta.3";
+static const char* FW_VERSION = "1.4.0";
 static const unsigned long WATCHDOG_MS = 60000UL;
 static const int MATRIX_LEDS = 25;
 
