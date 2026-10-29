@@ -6,17 +6,17 @@ static const char* FW_VERSION = "1.3.1";
 static const unsigned long WATCHDOG_MS = 60000UL;
 static const int MATRIX_LEDS = 25;
 
-// Texto
+// Text
 static const int TEXT_MAX_CHARS = 15;
-static const unsigned long TEXT_SLOT_MS  = 500;   // tiempo total por letra
-static const unsigned long TEXT_ON_MS    = 400;   // letra encendida (luego 100 ms apagado)
-static const unsigned long TEXT_PAUSE_MS = 1000;  // pausa entre repeticiones
-static const uint8_t CHAR_ENYE = 0x01;            // código interno para la Ñ
+static const unsigned long TEXT_SLOT_MS  = 500;   // total time per letter
+static const unsigned long TEXT_ON_MS    = 400;   // letter on (then 100 ms off)
+static const unsigned long TEXT_PAUSE_MS = 1000;  // pause between repetitions
+static const uint8_t CHAR_ENYE = 0x01;            // internal code for Ñ
 
 enum Pattern { PATTERN_FULL, PATTERN_LIGHTS, PATTERN_ROUNDED };
 enum DisplayMode { BL_MODE_STATUS, BL_MODE_TEXT };
 
-// ---------- Fuente 5x5 (bit 4 = columna izquierda) ----------
+// ---------- 5x5 font (bit 4 = left column) ----------
 
 struct Glyph { uint8_t code; uint8_t rows[5]; };
 
@@ -65,16 +65,16 @@ static const Glyph BL_FONT[] = {
     {':', {0b00000, 0b00100, 0b00000, 0b00100, 0b00000}},
 };
 
-// ---------- Estado ----------
+// ---------- State ----------
 
 DisplayMode mode       = BL_MODE_STATUS;
 Pattern  pattern       = PATTERN_FULL;
-uint32_t targetColor   = 0x0000FF;   // azul al arrancar
+uint32_t targetColor   = 0x0000FF;   // blue at boot
 uint32_t topColor      = 0;
 uint32_t middleColor   = 0;
 uint32_t bottomColor   = 0;
 String   effect        = "blink";
-uint8_t  brightnessPct = 100;        // 10-100 % sobre el brillo seguro de M5Atom
+uint8_t  brightnessPct = 100;        // 10-100 % of M5Atom's safe brightness
 unsigned long lastCommandMs = 0;
 
 uint8_t  textCodes[TEXT_MAX_CHARS];
@@ -89,7 +89,7 @@ uint32_t shown[MATRIX_LEDS];
 bool     shownValid = false;
 String   rxBuffer;
 
-// ---------- Utilidades de color ----------
+// ---------- Color helpers ----------
 
 uint32_t scaleColor(uint32_t c, uint8_t pct)
 {
@@ -112,7 +112,7 @@ uint32_t randomVividColor()
     return ((uint32_t)c.r << 16) | ((uint32_t)c.g << 8) | c.b;
 }
 
-// Envía el cuadro a la matriz solo si cambió
+// Sends the frame to the matrix only if it changed
 void pushFrame(const uint32_t frame[MATRIX_LEDS])
 {
     if (shownValid && memcmp(frame, shown, sizeof(shown)) == 0) return;
@@ -124,7 +124,7 @@ void pushFrame(const uint32_t frame[MATRIX_LEDS])
     shownValid = true;
 }
 
-// ---------- Texto ----------
+// ---------- Text ----------
 
 const uint8_t* findGlyph(uint8_t code)
 {
@@ -132,10 +132,10 @@ const uint8_t* findGlyph(uint8_t code)
     {
         if (BL_FONT[i].code == code) return BL_FONT[i].rows;
     }
-    return nullptr;   // espacio o carácter sin glifo
+    return nullptr;   // space or character without a glyph
 }
 
-// Convierte UTF-8 a códigos de la fuente: mayúsculas, sin acentos, con Ñ
+// Converts UTF-8 to font codes: uppercase, no accents, keeps Ñ
 int decodeText(const char* s, uint8_t* out, int maxLen)
 {
     const uint8_t* p = (const uint8_t*)s;
@@ -169,7 +169,7 @@ int decodeText(const char* s, uint8_t* out, int maxLen)
         }
         else
         {
-            // Otro carácter multibyte: se omite y se muestra como espacio
+            // Other multibyte character: skipped and shown as a space
             p++;
             while ((*p & 0xC0) == 0x80) p++;
         }
@@ -189,7 +189,7 @@ void renderText(unsigned long now, uint32_t frame[MATRIX_LEDS])
     unsigned long elapsed = now - textStartMs;
     long cycle = (long)(elapsed / cycleMs);
 
-    // Colores nuevos en cada repetición
+    // New colors on every repetition
     if (cycle != textCycle)
     {
         textCycle = cycle;
@@ -198,12 +198,12 @@ void renderText(unsigned long now, uint32_t frame[MATRIX_LEDS])
     }
 
     unsigned long t = elapsed % cycleMs;
-    if (t >= textMs) return;                         // pausa entre repeticiones
-    if (t % TEXT_SLOT_MS >= TEXT_ON_MS) return;      // apagado entre letras
+    if (t >= textMs) return;                         // pause between repetitions
+    if (t % TEXT_SLOT_MS >= TEXT_ON_MS) return;      // off between letters
 
     int idx = (int)(t / TEXT_SLOT_MS);
     const uint8_t* g = findGlyph(textCodes[idx]);
-    if (!g) return;                                  // espacio
+    if (!g) return;                                  // space
 
     uint32_t c = scaleColor(textColors[idx], brightnessPct);
     for (int row = 0; row < 5; row++)
@@ -211,7 +211,7 @@ void renderText(unsigned long now, uint32_t frame[MATRIX_LEDS])
             if (g[row] & (0x10 >> col)) frame[row * 5 + col] = c;
 }
 
-// ---------- Estado / semáforo ----------
+// ---------- Status / traffic light ----------
 
 void buildFrame(uint32_t frame[MATRIX_LEDS], uint8_t pct)
 {
@@ -223,7 +223,7 @@ void buildFrame(uint32_t frame[MATRIX_LEDS], uint8_t pct)
 
         if (pattern == PATTERN_LIGHTS)
         {
-            // Semáforo: filas 0, 2 y 4 encendidas
+            // Traffic light: rows 0, 2 and 4 on
             c = (row == 0) ? topColor
               : (row == 2) ? middleColor
               : (row == 4) ? bottomColor
@@ -233,7 +233,7 @@ void buildFrame(uint32_t frame[MATRIX_LEDS], uint8_t pct)
         {
             c = targetColor;
 
-            // Rounded: esquinas apagadas
+            // Rounded: corners off
             if (pattern == PATTERN_ROUNDED &&
                 (row == 0 || row == 4) && (col == 0 || col == 4))
             {
@@ -245,7 +245,7 @@ void buildFrame(uint32_t frame[MATRIX_LEDS], uint8_t pct)
     }
 }
 
-// ---------- Protocolo serial ----------
+// ---------- Serial protocol ----------
 
 void identify()
 {
@@ -346,14 +346,14 @@ void readSerial()
     }
 }
 
-// ---------- Animación ----------
+// ---------- Animation ----------
 
 void render()
 {
     unsigned long now = millis();
     uint32_t frame[MATRIX_LEDS];
 
-    // Watchdog: sin comandos por 60 s -> azul intermitente tenue
+    // Watchdog: no commands for 60 s -> dim blinking blue
     if (lastCommandMs != 0 && now - lastCommandMs > WATCHDOG_MS)
     {
         bool on = (now / 500) % 2 == 0;
@@ -395,7 +395,7 @@ void render()
 
 void setup()
 {
-    M5.begin(true, false, true);   // Serial, sin I2C, matriz LED
+    M5.begin(true, false, true);   // Serial, no I2C, LED matrix
     delay(50);
     randomSeed(esp_random());
     identify();
