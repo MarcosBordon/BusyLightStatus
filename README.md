@@ -1,64 +1,124 @@
-# Busy Light Status: M5Stack ATOM Matrix + Microsoft Teams
+# BusyLightStatus
 
-Prototipo con ATOM Matrix. Incluye aplicación de bandeja para Windows en .NET 8, consulta de presencia propia mediante Microsoft Graph, conexión USB serial y firmware PlatformIO/Arduino.
+Busy light for Microsoft Teams built on an **M5Stack ATOM Matrix** (ESP32, 5×5 RGB LEDs) and a **Windows tray app in .NET 8**. It helps people in meetings avoid interruptions.
 
-## 1. Preparación en Microsoft Entra ID
+## Features
 
-1. Registre una aplicación de tipo cliente público para una sola organización.
-2. Copie `Directory (tenant) ID` y `Application (client) ID`.
-3. Agregue Microsoft Graph, permiso delegado `Presence.Read`.
-4. En autenticación, habilite el escenario de aplicación móvil y de escritorio y configure un redirect URI compatible con cliente público.
-5. Aplique el proceso de consentimiento y asignación definido por Gobierno de IT.
-6. Reemplace `YOUR_TENANT_ID` y `YOUR_CLIENT_ID` en `src/BusyLight.Tray/appsettings.json`.
+- **Automatic (Teams):** reads your own presence through Microsoft Graph and shows it on the ATOM.
+- **Manual Use:** six statuses (Available, Busy, In a meeting, Do not disturb, Presenting, Away). Enabled automatically when Entra ID is not configured or not authorized.
+- **Custom color:** any RGB color with brightness from 10 to 100.
+- **Text message:** up to 15 characters, shown letter by letter (500 ms each), with a fixed color or random colors.
+- **Watchdog:** if the app stops sending data for 60 s, the ATOM blinks blue.
 
-No cree ni coloque un client secret en esta aplicación de escritorio.
+## Hardware
 
-## 2. Compilar la aplicación Windows
+| Item | Details |
+|---|---|
+| Board | M5Stack ATOM Matrix (ESP32-PICO-D4, 25 WS2812C LEDs on GPIO 27) |
+| Cable | USB-C with data support |
+| Extra wiring | None |
 
-Requisitos: Windows 10/11, SDK .NET 8 y Visual Studio 2022 o CLI de .NET.
+See [CONNECTIONS.md](CONNECTIONS.md) and [DIAGRAM.md](DIAGRAM.md).
+
+## Repository structure
+
+```text
+firmware/atom-matrix/   PlatformIO firmware (FW 1.3.1)
+src/BusyLight.Tray/     .NET 8 tray app
+tests/                  PowerShell serial tests
+```
+
+## 1. Flash the firmware
+
+Requirements: VS Code with PlatformIO.
 
 ```powershell
-dotnet restore .\BusyLightPilot.sln
+cd firmware\atom-matrix
+pio run
+pio run --target upload
+```
+
+Set `upload_port` and `monitor_port` in `platformio.ini` to your COM port.
+
+## 2. Configure the app
+
+Copy `src/BusyLight.Tray/appsettings.example.json` to `appsettings.json` in the same folder.
+
+| Setting | Description |
+|---|---|
+| `TenantId` | Directory (tenant) ID |
+| `ClientId` | Application (client) ID. Leave the placeholder to run in Manual Use only |
+| `PollSeconds` | Presence polling interval (10-30 s) |
+| `SerialBaudRate` | 115200 |
+| `Brightness` | Brightness in automatic mode (10-100) |
+
+`appsettings.json` is excluded by `.gitignore`. Never commit it.
+
+### Entra ID app registration (for automatic mode)
+
+- Single-tenant, public client (mobile and desktop), redirect URI `http://localhost`
+- Microsoft Graph delegated permission `Presence.Read`, with admin consent if required by the tenant
+- No client secret or certificate
+
+## 3. Build and run
+
+Requirements: .NET 8 SDK.
+
+```powershell
 dotnet build .\BusyLightPilot.sln -c Release
 dotnet run --project .\src\BusyLight.Tray\BusyLight.Tray.csproj
 ```
 
-Al primer inicio aparecerá el login corporativo. Después, la app queda en la bandeja y consulta presencia cada 20 segundos.
+The app finds the ATOM automatically on any COM port.
 
-## 3. Grabar el firmware
+## Serial protocol
 
-Requisitos: VS Code + PlatformIO, o PlatformIO Core.
+One JSON object per line, 115200 baud, 8N1.
+
+| Command | Example |
+|---|---|
+| `identify` | `{"cmd":"identify"}` |
+| `ping` | `{"Cmd":"ping"}` |
+| `setStatus` (full) | `{"Cmd":"setStatus","Color":"#FF0000","Effect":"pulse","Brightness":95}` |
+| `setStatus` (corners off) | `{"Cmd":"setStatus","Pattern":"rounded","Color":"#00FF00","Effect":"solid","Brightness":95}` |
+| `setStatus` (traffic light) | `{"Cmd":"setStatus","Pattern":"lights","Top":"#FF0000","Middle":"#FFC000","Bottom":"#00FF00","Effect":"solid","Brightness":80}` |
+| `setText` | `{"Cmd":"setText","Text":"IN A MEETING","Color":"#00A0FF","Random":false,"Brightness":80}` |
+
+Effects: `solid`, `pulse`, `doublepulse`, `blink`.
+
+## Status colors
+
+| Status | Color | Effect |
+|---|---|---|
+| Available | Green | Solid |
+| Busy | Red | Solid |
+| In a meeting / In a call | Red | Pulse |
+| Do not disturb | Red | Double pulse |
+| Presenting | Magenta | Pulse |
+| Away / Be right back | Yellow | Solid |
+| No data for 60 s | Blue | Blink |
+
+## Tests
+
+Close the app first, so the COM port is free.
 
 ```powershell
-cd .irmwaretom-matrix
-pio run
-pio run --target upload
-pio device monitor
+powershell -ExecutionPolicy Bypass -File .\tests\test_regression.ps1
 ```
 
-## 4. Prueba rápida sin Microsoft Graph
+| Script | Checks |
+|---|---|
+| `test_regression.ps1` | Identify and the six full-matrix statuses |
+| `test_lights_ping.ps1` | Traffic-light pattern and watchdog renewal |
+| `test_text.ps1` | Text, Ñ, accents, 15-character limit |
+| `test_rounded.ps1` | Manual statuses with corners off |
 
-Abra un terminal serial a 115200 y envíe una línea como:
+## Privacy and security
 
-```json
-{"Cmd":"setStatus","Availability":"Busy","Activity":"InAMeeting","Color":"#FF0000","Effect":"pulse","Brightness":20}
-```
+- Reads only the signed-in user's own presence.
+- No credentials are stored on the device.
+- No presence history is recorded.
 
-El ATOM devuelve `{"status":"ok"}`. Para descubrirlo, la app envía `{"cmd":"identify"}` y espera una respuesta que contenga `BUSYLIGHT-ATOM`.
+## License
 
-## 5. Estados básicos
-
-- Disponible: verde fijo.
-- Ocupado: rojo fijo.
-- En reunión o llamada: rojo pulsante.
-- No molestar: doble pulso rojo.
-- Presentando: magenta pulsante.
-- Ausente: amarillo.
-- Sin conexión con la app por 60 segundos: azul intermitente.
-
-## 6. Notas de prototipo
-
-- El firmware limita brillo por seguridad y fija un máximo de potencia de 300 mA.
-- La app prueba los puertos COM y reconoce el dispositivo mediante handshake.
-- El caché de MSAL de esta base es de proceso. Para despliegue corporativo conviene agregar persistencia protegida del token y firma del instalador.
-- Antes del piloto real, revise permisos, consentimiento, distribución del ejecutable y tratamiento de telemetría con Gobierno de IT y Ciberseguridad.
+MIT. See [LICENSE](LICENSE).
