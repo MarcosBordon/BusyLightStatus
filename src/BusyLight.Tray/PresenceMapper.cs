@@ -2,7 +2,7 @@ namespace BusyLight.Tray;
 
 public static class PresenceMapper
 {
-    // Modo automático (Teams) - sin cambios
+    // Automatic mode (Teams presence)
     public static DeviceCommand Map(GraphPresence p, byte brightness)
     {
         var a = p.Activity ?? "Unknown";
@@ -21,7 +21,7 @@ public static class PresenceMapper
         return new DeviceCommand("setStatus", v, a, color, effect, brightness);
     }
 
-     // Modo manual: mismos colores y efectos que Teams, brillo por estado, esquinas apagadas
+    // Manual mode: same colors and effects as Teams, per-state brightness, corners off
     public static PatternStatusCommand MapManual(ManualState state)
     {
         var (color, effect, brightness) = state switch
@@ -36,12 +36,12 @@ public static class PresenceMapper
 
         return new PatternStatusCommand("setStatus", "rounded", color, effect, (byte)brightness);
     }
-        // Color personalizado: esquinas apagadas, efecto fijo
+
+    // Custom color: corners off, solid
     public static PatternStatusCommand MapCustom(string color, int brightness) =>
         new("setStatus", "rounded", color, "solid", (byte)Math.Clamp(brightness, 10, 100));
 
-    // Mensaje de texto: el firmware lo muestra letra por letra y lo repite
+    // Text message: the firmware shows it letter by letter and repeats it
     public static TextCommand MapText(string text, string color, bool random, int brightness) =>
         new("setText", text, color, random, (byte)Math.Clamp(brightness, 10, 100));
-
 }

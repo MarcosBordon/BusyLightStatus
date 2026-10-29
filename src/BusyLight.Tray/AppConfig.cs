@@ -5,7 +5,7 @@ namespace BusyLight.Tray;
 public sealed record AppConfig(string TenantId = "", string ClientId = "", int PollSeconds = 20,
     int SerialBaudRate = 115200, byte Brightness = 100)
 {
-    // Solo se usa Teams si ambos IDs son GUID válidos (no "YOUR_CLIENT_ID")
+    // Teams is used only when both IDs are valid GUIDs (not "YOUR_CLIENT_ID")
     public bool IsGraphConfigured =>
         Guid.TryParse(TenantId, out _) && Guid.TryParse(ClientId, out _);
 

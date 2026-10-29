@@ -6,7 +6,7 @@ public sealed class TextMessageForm : Form
 {
     public const int MaxChars = 15;
     private const string Allowed = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 !?.-:";
-    private const char Enye = '\u00D1';   // Ñ
+    private const char Enye = '\u00D1';   // Ñ (supported by the ATOM font)
 
     private readonly TextBox _text = new()
     {
@@ -14,9 +14,9 @@ public sealed class TextMessageForm : Form
     };
     private readonly Label _counter = new() { AutoSize = true };
     private readonly Label _preview = new() { AutoSize = true };
-    private readonly RadioButton _fixed = new() { Text = "Color fijo", AutoSize = true };
-    private readonly RadioButton _random = new() { Text = "Random (colores aleatorios)", AutoSize = true };
-    private readonly Button _pick = new() { Text = "Elegir color…", Width = 110 };
+    private readonly RadioButton _fixed = new() { Text = Strings.FixedColor, AutoSize = true };
+    private readonly RadioButton _random = new() { Text = Strings.RandomColors, AutoSize = true };
+    private readonly Button _pick = new() { Text = Strings.PickColor, Width = 110 };
     private readonly Panel _swatch = new() { Width = 40, Height = 24, BorderStyle = BorderStyle.FixedSingle };
     private readonly TrackBar _brightness = new()
     {
@@ -35,7 +35,7 @@ public sealed class TextMessageForm : Form
     {
         _color = IsHex(initialColor) ? initialColor : "#00A0FF";
 
-        Text = "Mensaje de texto";
+        Text = Strings.TextTitle;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
         MinimizeBox = false;
@@ -43,8 +43,8 @@ public sealed class TextMessageForm : Form
         TopMost = true;
         ClientSize = new Size(370, 305);
 
-        var send = new Button { Text = "Enviar", Width = 80, Location = new Point(180, 265) };
-        var cancel = new Button { Text = "Cancelar", Width = 80, Location = new Point(270, 265), DialogResult = DialogResult.Cancel };
+        var send = new Button { Text = Strings.Send, Width = 80, Location = new Point(180, 265) };
+        var cancel = new Button { Text = Strings.Cancel, Width = 80, Location = new Point(270, 265), DialogResult = DialogResult.Cancel };
 
         _text.Location = new Point(20, 35);
         _counter.Location = new Point(280, 38);
@@ -58,12 +58,12 @@ public sealed class TextMessageForm : Form
 
         Controls.AddRange(new Control[]
         {
-            new Label { Text = $"Mensaje (máx. {MaxChars} caracteres)", AutoSize = true, Location = new Point(20, 15) },
+            new Label { Text = Strings.TextLabel(MaxChars), AutoSize = true, Location = new Point(20, 15) },
             _text, _counter, _preview,
             _fixed, _pick, _swatch, _random,
-            new Label { Text = "Brillo (10-100)", AutoSize = true, Location = new Point(20, 165) },
+            new Label { Text = Strings.Brightness, AutoSize = true, Location = new Point(20, 165) },
             _brightness, _brightnessLabel,
-            new Label { Text = "Cada letra se muestra 500 ms y la frase se repite.", AutoSize = true,
+            new Label { Text = Strings.TextHint, AutoSize = true,
                         ForeColor = SystemColors.GrayText, Location = new Point(20, 235) },
             send, cancel
         });
@@ -71,20 +71,20 @@ public sealed class TextMessageForm : Form
         AcceptButton = send;
         CancelButton = cancel;
 
-        // Valores iniciales
+        // Initial values
         _text.Text = initialText ?? "";
         _random.Checked = initialRandom;
         _fixed.Checked = !initialRandom;
         _brightness.Value = Math.Clamp(initialBrightness / 5 * 5, 10, 100);
         UpdateDisplay();
 
-        // Eventos
+        // Events
         _text.TextChanged += (_, _) => UpdateDisplay();
         _fixed.CheckedChanged += (_, _) => UpdateDisplay();
         _pick.Click += (_, _) => PickColor();
         _brightness.ValueChanged += (_, _) =>
         {
-            var snapped = _brightness.Value / 5 * 5;
+            var snapped = _brightness.Value / 5 * 5;   // steps of 5
             if (snapped != _brightness.Value) { _brightness.Value = Math.Max(10, snapped); return; }
             UpdateDisplay();
         };
@@ -92,7 +92,7 @@ public sealed class TextMessageForm : Form
         {
             if (string.IsNullOrWhiteSpace(MessageText))
             {
-                MessageBox.Show(this, "Escribe al menos una letra o número.", "Mensaje de texto",
+                MessageBox.Show(this, Strings.TextRequired, Strings.TextTitle,
                     MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 _text.Focus();
                 return;
@@ -101,7 +101,7 @@ public sealed class TextMessageForm : Form
         };
     }
 
-    // Mayúsculas, sin acentos, conserva la Ñ; lo no soportado pasa a espacio
+    // Uppercase, no accents, keeps Ñ; unsupported characters become spaces
     public static string Normalize(string? input)
     {
         if (string.IsNullOrEmpty(input)) return "";
@@ -132,7 +132,7 @@ public sealed class TextMessageForm : Form
     {
         _counter.Text = $"{_text.Text.Length}/{MaxChars}";
         var shown = Normalize(_text.Text).TrimEnd();
-        _preview.Text = shown.Length > 0 ? $"Se mostrará: {shown}" : "Se mostrará: (vacío)";
+        _preview.Text = shown.Length > 0 ? Strings.Preview(shown) : Strings.PreviewEmpty;
         _pick.Enabled = _fixed.Checked;
         _swatch.BackColor = _fixed.Checked ? ToColor(_color) : SystemColors.Control;
         _brightnessLabel.Text = $"{_brightness.Value} %";
