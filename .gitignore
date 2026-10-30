@@ -16,3 +16,5 @@ src/BusyLight.Tray/appsettings.json
 
 # Exclude appsettings.json, .exe y .pdb de la carpeta publish, ya que se generan en cada build y no son necesarios en el control de versiones
 publish/
+Output/
+drivers/
