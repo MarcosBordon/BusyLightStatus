@@ -13,12 +13,14 @@ public static class Strings
     public const string MenuManualStatus    = "Manual status";
     public const string MenuCustomColor     = "Custom color…";
     public const string MenuTextMessage     = "Text message…";
+    public const string MenuFirmware        = "Firmware";
+    public const string MenuFirmwareCheck   = "Check device compatibility…";
     public const string MenuRefresh         = "Refresh now";
     public const string MenuReconnect       = "Reconnect device";
     public const string MenuStatus          = "Status";
     public const string MenuExit            = "Exit";
 
-    // ---------- Manual states (same names Teams uses in English) ----------
+    // ---------- Manual states ----------
     public const string StateAvailable    = "Available";
     public const string StateBusy         = "Busy";
     public const string StateInAMeeting   = "In a meeting";
@@ -81,4 +83,15 @@ public static class Strings
     public const string GameNoTilt    = "Tilt sensor not available: using keys.";
     public static string GameLength(int n) => $"Length: {n} / 25";
     public static string GameBest(int n) => $"Best: {n}";
+
+    // ---------- Firmware ----------
+    public const string FirmwareCheckTitle       = "Firmware compatibility";
+    public const string FirmwareChecking         = "Checking device compatibility…";
+    public const string FirmwareCheckBusy         = "A firmware operation is already running.";
+    public const string FirmwareNoDevice          = "No compatible ATOM was found.";
+    public const string FirmwareCompatible        = "Compatible device detected";
+    public const string FirmwareNotCompatible     = "Device is not compatible";
+    public const string FirmwareValidationFailed  = "Firmware compatibility check failed.";
+    public const string FirmwareReady             = "Ready for firmware installation.";
+    public const string FirmwareInstallLater      = "Firmware installation will be added in the next stage.";
 }
