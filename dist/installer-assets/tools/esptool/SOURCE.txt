@@ -1,4 +1,0 @@
-esptool v4.8.1 - Copyright (C) Espressif Systems and contributors
-Licensed under the GNU General Public License v2.0 (see LICENSE.txt).
-Distributed unmodified as a separate program, called by BusyLightStatus.
-Source code: https://github.com/espressif/esptool/tree/v4.8.1
