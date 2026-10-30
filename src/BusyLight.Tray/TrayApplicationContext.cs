@@ -387,12 +387,12 @@ public sealed class TrayApplicationContext : ApplicationContext
     {
         try
         {
-            var path = Path.Combine(AppContext.BaseDirectory, "BusyLightStatus.ico");
-            return new Icon(path, SystemInformation.SmallIconSize);
+            return Icon.ExtractAssociatedIcon(Application.ExecutablePath)
+                ?? SystemIcons.Application;
         }
         catch
         {
-            return SystemIcons.Information;
+            return SystemIcons.Application;
         }
     }
 
