@@ -142,3 +142,17 @@ powershell -ExecutionPolicy Bypass -File .\tests\test_regression.ps1
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+## Acknowledgments and inspiration
+
+BusyLightStatus started as a personal project, inspired by two community projects that show Microsoft Teams presence on an LED device. They were the starting point for the idea and the approach:
+
+- **Elio Struyf**, *DIY: Building a busy light to show your Microsoft Teams presence*
+  https://www.eliostruyf.com/diy-building-busy-light-show-microsoft-teams-presence/
+  A step-by-step guide to building a do-it-yourself busy light that shows your Microsoft Teams presence status.
+
+- **Caroline Dunn**, *Status Light Indicator* (unicorn-busy-server)
+  https://github.com/carolinedunn/unicorn-busy-server
+  A simple busy light server for Raspberry Pi Zero and the Pimoroni Unicorn HAT.
+
+BusyLightStatus was written from scratch for the M5Stack ATOM Matrix and a .NET tray application, and **no code from these projects is included**. Many thanks to Elio Struyf and Caroline Dunn for sharing their work with the community.
