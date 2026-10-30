@@ -77,6 +77,11 @@ dotnet run --project .\src\BusyLight.Tray\BusyLight.Tray.csproj
 
 The app finds the ATOM automatically on any COM port.
 
+## 4. Installer
+
+A per-user installer (no administrator rights needed) is built with Inno Setup from `BusyLightStatus.iss`.
+See [BUILD.md](BUILD.md) for the full build, packaging and deployment steps.
+
 ## Serial protocol
 
 One JSON object per line, 115200 baud, 8N1.
