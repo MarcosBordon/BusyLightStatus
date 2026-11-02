@@ -18,3 +18,5 @@ src/BusyLight.Tray/appsettings.json
 publish/
 Output/
 drivers/
+.cache/
+dist

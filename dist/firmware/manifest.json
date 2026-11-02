@@ -1,0 +1,16 @@
+{
+  "name": "BusyLightStatus",
+  "version": "1.5.0",
+  "chip": "ESP32",
+  "minFlashMB": 4,
+  "file": "busylight-atom-matrix-1.5.0-merged.bin",
+  "offset": "0x0",
+  "baud": 115200,
+  "size": 396720,
+  "sha256": "fd35dd55776353779e827ac6ba9db0837f2265e12b0bb6e600ab87ca140109de",
+  "usbIds": [
+    "0403:6001"
+  ],
+  "buildDate": "2026-10-30T13:25:10Z",
+  "gitCommit": "81a844e"
+}
