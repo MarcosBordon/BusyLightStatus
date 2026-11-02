@@ -94,4 +94,13 @@ public static class Strings
     public const string FirmwareValidationFailed  = "Firmware compatibility check failed.";
     public const string FirmwareReady             = "Ready for firmware installation.";
     public const string FirmwareInstallLater      = "Firmware installation will be added in the next stage.";
+    public const string MenuFirmwareInstall        = "Install firmware…";
+    public const string FirmwareInstallTitle       = "Install firmware";
+    public const string FirmwareInstallConfirm     =
+        "BusyLightStatus will install the packaged firmware on the compatible ATOM.\n\n" +
+        "Do not disconnect the USB cable or close the application during installation.\n\n" +
+        "Continue?";
+    public const string FirmwareInstallSuccess     = "Firmware installed successfully";
+    public const string FirmwareInstallFailed      = "Firmware installation failed";
+    public const string FirmwareInstallCancelled   = "Firmware installation cancelled";
 }

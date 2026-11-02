@@ -13,7 +13,7 @@ public sealed class TrayApplicationContext : ApplicationContext
     private readonly SerialDeviceService _serial;
     private readonly GraphPresenceService? _graph;
     private readonly FirmwareCompatibilityService _firmwareCompatibility = new();
-
+    private readonly FirmwareInstallationService _firmwareInstaller;
     private bool _graphAvailable;
     private AppMode _mode;
     private string _last = Strings.Starting;
@@ -24,6 +24,7 @@ public sealed class TrayApplicationContext : ApplicationContext
     private readonly ToolStripMenuItem _textItem;
     private readonly ToolStripMenuItem _firmwareMenu;
     private readonly ToolStripMenuItem _firmwareCheckItem;
+    private readonly ToolStripMenuItem _firmwareInstallItem;
     private readonly Dictionary<ManualState, ToolStripMenuItem> _stateItems = new();
     private bool _customOpen;
     private bool _textOpen;
@@ -43,6 +44,7 @@ public sealed class TrayApplicationContext : ApplicationContext
     public TrayApplicationContext()
     {
         _serial = new SerialDeviceService(_config.SerialBaudRate);
+        _firmwareInstaller = new FirmwareInstallationService(_firmwareCompatibility);
         _graphAvailable = _config.IsGraphConfigured;
         if (_graphAvailable) _graph = new GraphPresenceService(_config);
         _mode = _graphAvailable ? _settings.Mode : AppMode.Manual;
@@ -65,8 +67,11 @@ public sealed class TrayApplicationContext : ApplicationContext
 
         _firmwareCheckItem = new ToolStripMenuItem(Strings.MenuFirmwareCheck, null,
             async (_, _) => await CheckFirmwareCompatibilityAsync());
+        _firmwareInstallItem = new ToolStripMenuItem(Strings.MenuFirmwareInstall, null,
+            async (_, _) => await InstallFirmwareAsync());
         _firmwareMenu = new ToolStripMenuItem(Strings.MenuFirmware);
         _firmwareMenu.DropDownItems.Add(_firmwareCheckItem);
+        _firmwareMenu.DropDownItems.Add(_firmwareInstallItem);
 
         var menu = new ContextMenuStrip();
         menu.Items.Add(modeMenu);
@@ -295,6 +300,116 @@ public sealed class TrayApplicationContext : ApplicationContext
         }
     }
 
+    private async Task InstallFirmwareAsync()
+    {
+        if (_firmwareOperation)
+        {
+            MessageBox.Show(
+                Strings.FirmwareCheckBusy,
+                Strings.FirmwareInstallTitle,
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+            return;
+        }
+
+        _firmwareOperation = true;
+        UpdateMenu();
+        SetStatus(Strings.FirmwareChecking);
+
+        var preferredPort = _serial.PortName;
+
+        try
+        {
+            // First validation: the confirmation identifies the exact target.
+            var device = await _serial.WithPortReleasedAsync(
+                () => _firmwareCompatibility.CheckAsync(preferredPort, _cts.Token),
+                _cts.Token);
+
+            if (!device.IsCompatible)
+            {
+                MessageBox.Show(
+                    device.ToDisplayText(),
+                    Strings.FirmwareInstallTitle,
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+                return;
+            }
+
+            var confirmation =
+                $"{device.ToDisplayText()}{Environment.NewLine}{Environment.NewLine}" +
+                Strings.FirmwareInstallConfirm;
+
+            if (MessageBox.Show(
+                    confirmation,
+                    Strings.FirmwareInstallTitle,
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Warning,
+                    MessageBoxDefaultButton.Button2)
+                != DialogResult.Yes)
+            {
+                return;
+            }
+
+            FirmwareInstallResult? result;
+
+            using (var form = new FirmwareInstallForm(
+                (progress, ct) => _serial.WithPortReleasedAsync(
+                    () => _firmwareInstaller.InstallAsync(device, progress, ct),
+                    ct)))
+            {
+                form.ShowDialog();
+                result = form.Result;
+            }
+
+            if (result is null)
+            {
+                SetStatus(Strings.FirmwareInstallFailed);
+                MessageBox.Show(
+                    Strings.FirmwareInstallFailed,
+                    Strings.FirmwareInstallTitle,
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+                return;
+            }
+
+            SetStatus(result.Success
+                ? Strings.FirmwareInstallSuccess
+                : Strings.FirmwareInstallFailed);
+
+            MessageBox.Show(
+                result.Message,
+                Strings.FirmwareInstallTitle,
+                MessageBoxButtons.OK,
+                result.Success ? MessageBoxIcon.Information : MessageBoxIcon.Error);
+        }
+        catch (OperationCanceledException)
+        {
+            SetStatus(Strings.FirmwareInstallCancelled);
+        }
+        catch (Exception ex)
+        {
+            SetStatus(Strings.FirmwareInstallFailed);
+            MessageBox.Show(
+                $"{Strings.FirmwareInstallFailed}{Environment.NewLine}{Environment.NewLine}{ex.Message}",
+                Strings.FirmwareInstallTitle,
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+        }
+        finally
+        {
+            _firmwareOperation = false;
+            UpdateMenu();
+
+            // Verification has released the port. Reconnect the tray service and
+            // restore the mode that was active before the installation.
+            await SafeAsync(async ct =>
+            {
+                await _serial.ConnectAsync(ct);
+                await RefreshAsync(ct);
+            });
+        }
+    }
+
     // ---------- Menu actions ----------
 
     private async Task SetModeAsync(AppMode mode)
@@ -451,6 +566,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         _textItem.Checked   = _mode == AppMode.Manual && _settings.ManualState == ManualState.Text;
 
         _firmwareCheckItem.Enabled = enabled;
+        _firmwareInstallItem.Enabled = enabled;
         _firmwareMenu.Enabled = enabled;
     }
 
